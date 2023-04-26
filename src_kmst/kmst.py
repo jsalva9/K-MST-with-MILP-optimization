@@ -1,8 +1,8 @@
 from math import ceil
-from src.config import Config
+from src_kmst.config import Config
 from ortools.linear_solver import pywraplp
 
-from src.utils import Instance
+from src_kmst.utils import Instance
 
 
 class KMST:

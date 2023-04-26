@@ -7,7 +7,7 @@ class TSP:
         self.n = n
         self.tol = tol
         self.solver = pywraplp.Solver.CreateSolver('SCIP')
-        self.df_dist = pd.read_csv('data/df_dist.csv')
+        self.df_dist = pd.read_csv('../data/df_dist.csv')
 
         self.df_dist = self.df_dist[self.df_dist['city_id1'] < n]
 
