@@ -22,3 +22,12 @@ class Instance:
         self.A = {(u, v) for (u, v) in self.E}.union({(v, u) for (u, v) in self.E})
         self.Aext = {(u, v) for (u, v) in self.Eext}.union({(v, u) for (u, v) in self.Eext})
         self.weights = {**self.weights, **{(v, u): w for (u, v), w in self.weights.items()}}
+
+
+OPTIMAL_SOLUTIONS = {
+    '1_0': 46, '1_1': 477, '2_0': 373, '2_1': 1390,
+    '3_0': 725, '3_1': 3074, '4_0': 909, '4_1': 3292,
+    '5_0': 1235, '5_1': 4898, '6_0': 2068, '6_1': 6705,
+    '7_0': 1335, '7_1': 4534, '8_0': 1620, '8_1': 5787,
+    '9_0': 2289, '9_1': 7595, '10_0': 4182, '10_1': 14991,
+}

@@ -1,7 +1,7 @@
 from math import ceil
 from src_kmst.config import Config
 from ortools.linear_solver import pywraplp
-from src_kmst.utils import Instance
+from src_kmst.utils import Instance, OPTIMAL_SOLUTIONS
 import networkx as nx
 from copy import copy
 
@@ -11,6 +11,7 @@ class KMST:
         self.instance_names = config.config['instances']
         self.formulation = config.config['formulation']
         self.solver_name = config.config['solver']
+        self.validate_solution = config.config['validate_solution']
         self.data_path = config.data_path
 
         self.instances = {}
@@ -20,17 +21,19 @@ class KMST:
         }
         self.solver = pywraplp.Solver.CreateSolver(solvers_map[self.solver_name])
 
-        self.x, self.u, self.f = None, None, None  # Variables
+        self.x, self.u, self.f, self.z = None, None, None, None  # Variables
 
     def load_instances(self):
         # For each instance in self.instances, load the instance and create two new instances with k = m/5 and k = m/2
         for instance_name in self.instance_names:
             instance_0 = self.load_instance(instance_name)
             instance_0.k = ceil(instance_0.n / 5)
-            self.instances[f'{instance_name}_0'] = instance_0
+            instance_0.name = f'{instance_name}_0'
+            self.instances[instance_0.name] = instance_0
             instance_1 = copy(instance_0)
             instance_1.k = ceil(instance_1.n / 2)
-            self.instances[f'{instance_name}_1'] = instance_1
+            instance_1.name = f'{instance_name}_1'
+            self.instances[instance_1.name] = instance_1
 
     def load_instance(self, instance_name: str) -> Instance:
         instance_string = str(instance_name) if len(str(instance_name)) == 2 else f'0{instance_name}'
@@ -50,7 +53,7 @@ class KMST:
         return Instance(f'instance_{instance_string}', n, m, Vext, Eext, weights)
 
     def define_variables(self, instance: Instance):
-        self.x, self.u, self.f = {}, {}, {}
+        self.x, self.u, self.f, self.z = {}, {}, {}, {}
         if self.formulation == 'MTZ':
             self.define_variables_mtz(instance)
         elif self.formulation == 'SCF':
@@ -71,25 +74,49 @@ class KMST:
             raise ValueError('Formulation not recognized')
 
     def define_variables_mtz(self, instance: Instance):
-        for (u, v) in instance.A:
-            self.x[u, v] = self.solver.IntVar(0, 1, f'x_{u}_{v}')
-        for v in instance.V:
-            self.u[v] = self.solver.IntVar(1, instance.k, f'u_{v}')
+        for (i, j) in instance.A:
+            self.x[i, j] = self.solver.IntVar(0, 1, f'x_{i}_{j}')
+        for i in instance.V:
+            self.u[i] = self.solver.IntVar(0, instance.k, f'u_{i}')
+            self.z[i] = self.solver.IntVar(0, 1, f'z_{i}')
 
     def define_constraints_mtz(self, instance: Instance):
         self.solver.Add(sum(self.x[i, j] + self.x[j, i] for (i, j) in instance.E) == instance.k - 1)
+        self.solver.Add(sum(self.z[i] for i in instance.V) == instance.k)
         for (i, j) in instance.A:
-            self.solver.Add(self.x[i, j] + self.x[j, i] <= 1)
-            self.solver.Add(self.u[i] + self.x[i, j] - self.u[j] <= (instance.k - 1) * (1 - self.x[i, j]))
+            # self.solver.Add(self.x[i, j] + self.x[j, i] <= 1)
+            self.solver.Add(self.u[i] + self.x[i, j] - self.u[j] <= instance.k * (1 - self.x[i, j]))
+            # Can be rewritten with z_i instead of x_ij
+        for i in instance.V:
+            # self.solver.Add(self.z[i] <= self.u[i])
+            # self.solver.Add(self.u[i] <= instance.k * self.z[i])
+            # self.solver.Add(self.z[i] <= sum(self.x[i, j] for j in instance.V if (i, j) in instance.A) + sum(
+            #     self.x[j, i] for j in instance.V if (j, i) in instance.A))
+            self.solver.Add((sum(self.x[i, j] for j in instance.V if (i, j) in instance.A) + sum(
+                self.x[j, i] for j in instance.V if (j, i) in instance.A)) <= (instance.k - 1) * self.z[i])
+            # self.solver.Add(sum(self.x[j, i] for j in instance.V if (j, i) in instance.A) <= self.z[i])
+            self.solver.Add(sum(self.x[i, j] for j in instance.V if (i, j) in instance.A) <= self.z[i])
 
     def define_variables_scf(self, instance: Instance):
-        pass
+        for e in instance.Eext:
+            self.x[e] = self.solver.IntVar(0, 1, f'x_{e}')
+        for i, j in instance.Aext:
+            self.f[i, j] = self.solver.IntVar(0, instance.k, f'f_{i}_{j}')
+        for i in instance.Vext:
+            self.z[i] = self.solver.IntVar(0, 1, f'z_{i}')
 
     def define_variables_mcf(self, instance: Instance):
         pass
 
     def define_constraints_scf(self, instance: Instance):
-        pass
+        self.solver.Add(sum(self.x[e] for e in instance.E) == instance.k - 1)
+        self.solver.Add(sum(self.z[i] for i in instance.V) == instance.k)
+        self.solver.Add(instance.k == sum(self.f[0, i] for i in instance.V))
+        for i in instance.V:
+            self.solver.Add(sum(self.f[j, i] for j in instance.V if (j, i) in instance.Aext) - sum(
+                self.f[i, j] for j in instance.V if (i, j) in instance.Aext) <= self.z[i])
+        for i, j in instance.Eext:
+            self.solver.Add(self.f[i, j] + self.f[j, i] <= (instance.k - 1) * self.x[i, j]) # Might need to split this into two constraints
 
     def define_constraints_mcf(self, instance: Instance):
         pass
@@ -105,23 +132,36 @@ class KMST:
     def solve(self, instance: Instance):
         status = self.solver.Solve()
         if status == pywraplp.Solver.OPTIMAL:
-            print(f'Instance {instance.name} solved with objective {self.solver.Objective().Value()}')
+            print(f' - solved with objective {self.solver.Objective().Value()}')
+            print(f' - solved in {self.solver.WallTime() / 1000} s')
             return True
-        print(f'Instance {instance.name} not solved. Status: {status}')
+        print(f' - not solved. Status: {status}')
         return False
 
     def validate(self, instance: Instance):
+        if not self.validate_solution:
+            return
+        if self.validate_solution == 'easy':
+            # Check if the optimal value is the same as the one obtained by the solver
+            equal = round(self.solver.Objective().Value()) == OPTIMAL_SOLUTIONS[instance.name]
+            print(f' - solved with optimal value: {equal}')
+            return
+
         print('-' * 5, 'Validating solution', '-' * 5)
         print(f'Instance n: {instance.n}')
         print(f'Instance m: {instance.m}')
         print(f'Instance k: {instance.k}')
 
-
         # Build the solution in networkx
         G = nx.Graph()
-        for (i, j) in instance.A:
-            if self.x[i, j].solution_value() == 1:
-                G.add_edge(i, j)
+        if self.formulation == 'MTZ':
+            for (i, j) in instance.A:
+                if self.x[i, j].solution_value() == 1:
+                    G.add_edge(i, j)
+        elif self.formulation in ['SCF', 'MCF']:
+            for e in instance.E:
+                if self.x[e].solution_value() == 1:
+                    G.add_edge(*e)
         # Check if the solution is a tree
         print(f'Subgraph nodes: {G.nodes()}')
         print(f'Subgraph edges: {G.edges()}')
@@ -131,10 +171,12 @@ class KMST:
             # Check u values for the solution nodes
             u_values = {v: self.u[v].solution_value() for v in G.nodes()}
             print(f'Subgraph u values: {u_values}')
+        if self.formulation == 'SCF':
+            # Check f values for the solution edges
+            f_values = {e: self.f[e].solution_value() for e in G.edges()}
+            print(f'Subgraph f values: {f_values}')
 
         print('-' * 5, 'End validation', '-' * 5)
-
-
 
     def run(self):
         self.load_instances()
@@ -146,8 +188,6 @@ class KMST:
             feasible = self.solve(instance)
             if feasible:
                 self.validate(instance)
-
-
 
 
 if __name__ == '__main__':
