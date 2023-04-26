@@ -1,8 +1,9 @@
 from math import ceil
 from src_kmst.config import Config
 from ortools.linear_solver import pywraplp
-
 from src_kmst.utils import Instance
+import networkx as nx
+from copy import copy
 
 
 class KMST:
@@ -24,11 +25,12 @@ class KMST:
     def load_instances(self):
         # For each instance in self.instances, load the instance and create two new instances with k = m/5 and k = m/2
         for instance_name in self.instance_names:
-            instance = self.load_instance(instance_name)
-            instance.k = ceil(instance.m / 5)
-            self.instances[f'{instance_name}_0'] = instance
-            instance.k = ceil(instance.m / 2)
-            self.instances[f'{instance_name}_1'] = instance
+            instance_0 = self.load_instance(instance_name)
+            instance_0.k = ceil(instance_0.n / 5)
+            self.instances[f'{instance_name}_0'] = instance_0
+            instance_1 = copy(instance_0)
+            instance_1.k = ceil(instance_1.n / 2)
+            self.instances[f'{instance_name}_1'] = instance_1
 
     def load_instance(self, instance_name: str) -> Instance:
         instance_string = str(instance_name) if len(str(instance_name)) == 2 else f'0{instance_name}'
@@ -75,7 +77,7 @@ class KMST:
             self.u[v] = self.solver.IntVar(1, instance.k, f'u_{v}')
 
     def define_constraints_mtz(self, instance: Instance):
-        self.solver.Add(sum(self.x[i, j] + self.x[j, i] for (i, j) in instance.A) == instance.k - 1)
+        self.solver.Add(sum(self.x[i, j] + self.x[j, i] for (i, j) in instance.E) == instance.k - 1)
         for (i, j) in instance.A:
             self.solver.Add(self.x[i, j] + self.x[j, i] <= 1)
             self.solver.Add(self.u[i] + self.x[i, j] - self.u[j] <= (instance.k - 1) * (1 - self.x[i, j]))
@@ -104,17 +106,48 @@ class KMST:
         status = self.solver.Solve()
         if status == pywraplp.Solver.OPTIMAL:
             print(f'Instance {instance.name} solved with objective {self.solver.Objective().Value()}')
-        else:
-            print(f'Instance {instance.name} not solved. Status: {status}')
+            return True
+        print(f'Instance {instance.name} not solved. Status: {status}')
+        return False
+
+    def validate(self, instance: Instance):
+        print('-' * 5, 'Validating solution', '-' * 5)
+        print(f'Instance n: {instance.n}')
+        print(f'Instance m: {instance.m}')
+        print(f'Instance k: {instance.k}')
+
+
+        # Build the solution in networkx
+        G = nx.Graph()
+        for (i, j) in instance.A:
+            if self.x[i, j].solution_value() == 1:
+                G.add_edge(i, j)
+        # Check if the solution is a tree
+        print(f'Subgraph nodes: {G.nodes()}')
+        print(f'Subgraph edges: {G.edges()}')
+        print(f'Subgraph a tree: {nx.is_tree(G)}')
+        print(f'Subgraph is connected: {nx.is_connected(G)}')
+        if self.formulation == 'MTZ':
+            # Check u values for the solution nodes
+            u_values = {v: self.u[v].solution_value() for v in G.nodes()}
+            print(f'Subgraph u values: {u_values}')
+
+        print('-' * 5, 'End validation', '-' * 5)
+
+
 
     def run(self):
         self.load_instances()
         for instance_name, instance in self.instances.items():
-            print(f'Running instance {instance_name}')
+            print(f'\nRunning instance {instance_name}')
             self.define_variables(instance)
             self.define_constraints(instance)
             self.define_objective(instance)
-            self.solve(instance)
+            feasible = self.solve(instance)
+            if feasible:
+                self.validate(instance)
+
+
 
 
 if __name__ == '__main__':
