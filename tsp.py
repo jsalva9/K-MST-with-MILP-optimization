@@ -3,8 +3,9 @@ from ortools.linear_solver import pywraplp
 
 
 class TSP:
-    def __init__(self, n):
+    def __init__(self, n, tol=0.1):
         self.n = n
+        self.tol = tol
         self.solver = pywraplp.Solver.CreateSolver('SCIP')
         self.df_dist = pd.read_csv('data/df_dist.csv')
 
@@ -47,14 +48,24 @@ class TSP:
     def define_objective(self):
         self.solver.Minimize(sum(self.d[i, j] * self.x[i, j] for i in self.cities for j in self.cities if i != j))
 
+    def define_tolerance(self):
+        parameters = pywraplp.MPSolverParameters()
+        parameters.SetDoubleParam(pywraplp.MPSolverParameters.RELATIVE_MIP_GAP, self.tol)
+        return parameters
+
     def run(self):
         self.define_variables()
         self.define_constraints()
         self.define_objective()
+        parameters = self.define_tolerance()
         print('Number of variables =', self.solver.NumVariables())
         print('Number of constraints =', self.solver.NumConstraints())
         print('Solving the problem ...')
-        status = self.solver.Solve()
+        status = self.solver.Solve(parameters)
+        self.display_result(status)
+
+    def display_result(self, status):
+        print(f'Solving time = {self.solver.WallTime()} milliseconds')
         if status == pywraplp.Solver.OPTIMAL:
             print('Objective value =', self.solver.Objective().Value())
             for i in self.cities:
@@ -68,5 +79,5 @@ class TSP:
 
 
 if __name__ == '__main__':
-    tsp = TSP(n=400)
+    tsp = TSP(n=2000, tol=1.5)
     tsp.run()
