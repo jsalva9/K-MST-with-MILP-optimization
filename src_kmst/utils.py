@@ -23,6 +23,24 @@ class Instance:
         self.Aext = {(u, v) for (u, v) in self.Eext}.union({(v, u) for (u, v) in self.Eext})
         self.weights = {**self.weights, **{(v, u): w for (u, v), w in self.weights.items()}}
 
+    def find_tree(self):
+        start = 1
+        tree = {start}
+        visited = {i: False for i in self.V}
+        q = [start]
+        while len(q) > 0:
+            u = q.pop(0)
+            tree.add(u)
+            if len(tree) == self.k:
+                return tree
+            visited[u] = True
+            for v in self.V:
+                if (u, v) in self.E and not visited[v]:
+                    q.append(v)
+        return tree
+
+
+
 
 OPTIMAL_SOLUTIONS = {
     '1_0': 46, '1_1': 477, '2_0': 373, '2_1': 1390,

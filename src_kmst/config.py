@@ -11,9 +11,15 @@ class Config:
 
         self.config = self.load_config()
         self.data_path = f'{self.root}/{self.config["data_path"]}'
+        self.output_path = f'{self.root}/{self.config["output_path"]}'
 
     def load_config(self):
         # Read yaml file in self.config_path
         with open(self.config_path, 'r') as f:
             config = yaml.safe_load(f)
         return config
+
+    def set_formulation(self, formulation):
+        if formulation not in ["MTZ", "SCF", "MCF"]:
+            raise ValueError(f"Formulation {formulation} not supported")
+        self.config['formulation'] = formulation
