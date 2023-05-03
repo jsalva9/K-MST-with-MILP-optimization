@@ -23,3 +23,8 @@ class Config:
         if formulation not in ["MTZ", "SCF", "MCF"]:
             raise ValueError(f"Formulation {formulation} not supported")
         self.config['formulation'] = formulation
+
+    def set_tighten(self, tighten):
+        if tighten not in [True, False]:
+            raise ValueError(f"Tighten {tighten} not supported")
+        self.config['tighten'] = tighten

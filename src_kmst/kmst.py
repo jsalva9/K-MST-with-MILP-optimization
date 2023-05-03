@@ -6,29 +6,36 @@ import networkx as nx
 from datetime import datetime
 from math import ceil
 from copy import copy
+import os, time
+from pyinstrument import Profiler
 
 
 class KMST:
     def __init__(self, config: Config):
+        self.solver = None
         self.instance_names = config.config['instances']
         self.formulation = config.config['formulation']
         self.solver_name = config.config['solver']
         self.validate_solution = config.config['validate_solution']
         self.time_limit = config.config['time_limit']
         self.hint_solution = config.config['hint_solution']
+        self.tighten = config.config['tighten']
         self.data_path = config.data_path
 
         self.instances = {}
-        solvers_map = {
-            'ortools': 'SCIP',
-            'gurobi': 'GUROBI'
-        }
-        self.solver = pywraplp.Solver.CreateSolver(solvers_map[self.solver_name])
-        self.solver.set_time_limit(self.time_limit * 1000)
 
         self.x, self.u, self.f, self.z = None, None, None, None  # Variables
 
         self.results = pd.DataFrame()  # Dataframe with results
+
+    def define_model(self):
+        solvers_map = {
+            'ortools': 'SCIP',
+            'gurobi': 'GUROBI',
+            'cplex': 'CPLEX'
+        }
+        self.solver = pywraplp.Solver.CreateSolver(solvers_map[self.solver_name])
+        self.solver.set_time_limit(self.time_limit * 1000)
 
     def load_instances(self):
         # For each instance in self.instances, load the instance and create two new instances with k = m/5 and k = m/2
@@ -93,18 +100,20 @@ class KMST:
         self.solver.Add(sum(self.x[i, j] + self.x[j, i] for (i, j) in instance.E) == instance.k - 1)
         self.solver.Add(sum(self.z[i] for i in instance.V) == instance.k)
         for (i, j) in instance.A:
-            self.solver.Add(self.x[i, j] + self.x[j, i] <= 1)
+            if self.tighten:
+                self.solver.Add(self.x[i, j] + self.x[j, i] <= 1)
             self.solver.Add(self.u[i] + self.x[i, j] - self.u[j] <= instance.k * (1 - self.x[i, j]))
             # Can be rewritten with z_i instead of x_ij
         for i in instance.V:
-            self.solver.Add(self.z[i] <= self.u[i])
-            self.solver.Add(self.u[i] <= instance.k * self.z[i])
-            self.solver.Add(self.z[i] <= sum(self.x[i, j] for j in instance.V if (i, j) in instance.A) + sum(
-                self.x[j, i] for j in instance.V if (j, i) in instance.A))
+            if self.tighten:
+                self.solver.Add(self.z[i] <= self.u[i])
+                self.solver.Add(self.u[i] <= instance.k * self.z[i])
+                self.solver.Add(self.z[i] <= sum(self.x[i, j] for j in instance.V if (i, j) in instance.A) + sum(
+                    self.x[j, i] for j in instance.V if (j, i) in instance.A))
+
             self.solver.Add((sum(self.x[i, j] for j in instance.V if (i, j) in instance.A) + sum(
                 self.x[j, i] for j in instance.V if (j, i) in instance.A)) <= (instance.k - 1) * self.z[i])
-            # self.solver.Add(sum(self.x[j, i] for j in instance.V if (j, i) in instance.A) <= self.z[i])
-            self.solver.Add(sum(self.x[i, j] for j in instance.V if (i, j) in instance.A) <= self.z[i])
+            self.solver.Add(sum(self.x[j, i] for j in instance.V if (j, i) in instance.A) <= self.z[i])
 
     def define_variables_scf(self, instance: Instance):
         for e in instance.Eext:
@@ -115,17 +124,21 @@ class KMST:
             self.z[i] = self.solver.IntVar(0, 1, f'z_{i}')
 
     def define_constraints_scf(self, instance: Instance):
-        self.solver.Add(sum(self.x[e] for e in instance.E) == instance.k - 1)
+        if self.tighten:
+            self.solver.Add(sum(self.x[e] for e in instance.E) == instance.k - 1)
         self.solver.Add(sum(self.z[i] for i in instance.V) == instance.k)
         self.solver.Add(instance.k == sum(self.f[0, i] for i in instance.V))
         for i in instance.V:
             self.solver.Add(self.f[0, i] == instance.k * self.x[0, i])
+            if self.tighten:
+                self.solver.Add(self.f[i, 0] == 0)
             self.solver.Add(sum(self.f[i, j] for j in instance.Vext if (i, j) in instance.Aext) - sum(
                 self.f[j, i] for j in instance.Vext if (j, i) in instance.Aext) == - self.z[i])
         for i, j in instance.E:
             self.solver.Add(self.f[i, j] + self.f[j, i] <= (instance.k - 1) * self.x[i, j])
-            self.solver.Add(self.f[i, j] <= (instance.k - 1) * self.x[i, j])
-            self.solver.Add(self.f[j, i] <= (instance.k - 1) * self.x[i, j])
+            if self.tighten:
+                self.solver.Add(self.f[i, j] <= (instance.k - 1) * self.x[i, j])
+                self.solver.Add(self.f[j, i] <= (instance.k - 1) * self.x[i, j])
 
     def define_variables_mcf(self, instance: Instance):
         for e in instance.Eext:
@@ -137,17 +150,22 @@ class KMST:
             self.z[i] = self.solver.IntVar(0, 1, f'z_{i}')
 
     def define_constraints_mcf(self, instance: Instance):
-        self.solver.Add(sum(self.x[e] for e in instance.E) == instance.k - 1)
+        if self.tighten:
+            self.solver.Add(sum(self.x[e] for e in instance.E) == instance.k - 1)
         self.solver.Add(sum(self.z[i] for i in instance.V) == instance.k)
-        self.solver.Add(instance.k == sum(self.f[0, i, l] for i in instance.V for l in instance.V))
+        self.solver.Add(sum(self.f[0, i, l] for i in instance.V for l in instance.V) == instance.k)
         for i in instance.V:
             self.solver.Add(instance.k * self.x[0, i] == sum(self.f[0, i, l] for l in instance.V))
+            if self.tighten:
+                for l in instance.V:
+                    self.solver.Add(self.f[i, 0, l] == 0)
 
         for (i, j) in instance.E:
             for l in instance.V:
                 self.solver.Add(self.f[i, j, l] + self.f[j, i, l] <= self.x[i, j])
-                self.solver.Add(self.f[i, j, l] <= self.x[i, j])
-                self.solver.Add(self.f[j, i, l] <= self.x[i, j])
+                if self.tighten:
+                    self.solver.Add(self.f[i, j, l] <= self.x[i, j])
+                    self.solver.Add(self.f[j, i, l] <= self.x[i, j])
         for i in instance.Vext:
             for l in instance.V:
                 if i == 0:
@@ -169,13 +187,15 @@ class KMST:
             raise ValueError('Formulation not recognized')
 
     def solve(self, instance: Instance):
+        a = time.time()
         status = self.solver.Solve()
+        solve_time = time.time() - a
         if status == pywraplp.Solver.OPTIMAL:
             print(f' - solved with objective {self.solver.Objective().Value()}')
             print(f' - solved in {self.solver.WallTime() / 1000} s')
-            return True
+            return True, solve_time
         print(f' - not solved. Status: {status}')
-        return False
+        return False, solve_time
 
     def validate(self, instance: Instance):
         if not self.validate_solution:
@@ -226,7 +246,7 @@ class KMST:
 
         print('-' * 5, 'End validation', '-' * 5)
 
-    def write_results(self, instance: Instance):
+    def write_results(self, instance: Instance, solve_time: float):
         if self.solver.Solve() == pywraplp.Solver.NOT_SOLVED:
             opt_gap = float('nan')
         else:
@@ -247,11 +267,14 @@ class KMST:
             'best_bound': self.solver.Objective().BestBound(),
             'status': self.solver.Solve(),
             'theoretical_optimal': OPTIMAL_SOLUTIONS[instance.name],
-            'opt_gap': opt_gap
+            'opt_gap': opt_gap,
+            'tighten': self.tighten,
+            'solve_time': solve_time
         }
         if not len(self.results):
-            self.results = pd.DataFrame(columns=d.keys())
-        self.results = pd.concat([self.results, pd.DataFrame(d, index=[0])])
+            self.results = pd.DataFrame(columns=list(d.keys())).astype({'define_hints': bool, 'tighten': bool})
+        run_results = pd.DataFrame(d, index=[0])
+        self.results = pd.concat([self.results, run_results], ignore_index=True)
 
     def define_hints(self, instance: Instance):
         tree = instance.find_tree()
@@ -267,33 +290,57 @@ class KMST:
     def run(self):
         self.load_instances()
         for instance_name, instance in self.instances.items():
-            print(f'\nRunning instance {instance_name} with {self.formulation}')
+            if instance_name[-1] == '1':
+                continue
+            print(f'\nRunning instance {instance_name} with {self.formulation}. Solver: {self.solver_name}, tighten: {self.tighten}')
+            self.define_model()
             self.define_variables(instance)
             self.define_constraints(instance)
             self.define_objective(instance)
+            print(f' - building model took {self.solver.WallTime() / 1000} seconds')
             if self.hint_solution:
                 self.define_hints(instance)
-            feasible = self.solve(instance)
+            feasible, solve_time = self.solve(instance)
             if feasible:
                 self.validate(instance)
-            self.write_results(instance)
+            self.write_results(instance, solve_time)
         print(self.results)
 
 
 if __name__ == '__main__':
     config = Config()
+    prof = Profiler()
+    prof.start()
 
+    formulations = ['MTZ']
+    tighten_vals = [True, False]
     results = []
 
-    for formulation in ['MTZ']:
-        config.set_formulation(formulation)
-        kmst = KMST(config)
-        kmst.run()
-        results.append(kmst.results)
-        kmst.results.to_csv(f'{config.output_path}/temp.csv', index=False)
+    for formulation in formulations:
+        for tighten in tighten_vals:
+            config.set_formulation(formulation)
+            config.set_tighten(tighten)
+            kmst = KMST(config)
+            kmst.run()
+            results.append(kmst.results)
+            kmst.results.to_csv(f'{config.output_path}/temp_{formulation}_{tighten}.csv', index=False)
 
     # Print results with timestamp
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     results = pd.concat(results)
 
+    # Delete temp files
+    for formulation in formulations:
+        for tighten in tighten_vals:
+            os.remove(f'{config.output_path}/temp_{formulation}_{tighten}.csv')
+
     results.to_csv(f'{config.output_path}/{timestamp}.csv', index=False)
+
+    # Open results.csv
+    aux = pd.read_csv(f'{config.output_path}/results.csv')
+    results = pd.concat([aux, results])
+    results.drop_duplicates(['instance', 'solver', 'tighten', 'formulation'], inplace=True, keep='last')
+    results.to_csv(f'{config.output_path}/results.csv', index=False)
+
+    prof.stop()
+    prof.print()
