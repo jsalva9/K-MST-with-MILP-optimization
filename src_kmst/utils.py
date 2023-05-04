@@ -2,8 +2,12 @@ from dataclasses import dataclass
 from typing import Set, Tuple, Dict
 import pandas as pd
 
+
 @dataclass
 class Instance:
+    """
+    Instance of the k-MST problem.
+    """
     name: str
     n: int
     m: int
@@ -17,6 +21,9 @@ class Instance:
     k: int = None
 
     def __post_init__(self):
+        """
+        Define the original graph from the extended graph.
+        """
         self.V = self.Vext - {0}
         self.E = self.Eext - {(0, v) for v in self.V} - {(v, 0) for v in self.V}
         self.A = {(u, v) for (u, v) in self.E}.union({(v, u) for (u, v) in self.E})
@@ -24,6 +31,12 @@ class Instance:
         self.weights = {**self.weights, **{(v, u): w for (u, v), w in self.weights.items()}}
 
     def find_tree(self):
+        """
+        Find a tree with k vertices in the graph. The tree is found by performing a BFS from vertex 1.
+
+        Returns:
+            tree (set): set of vertices in the tree
+        """
         start = 1
         tree = {start}
         visited = {i: False for i in self.V}
@@ -50,22 +63,35 @@ OPTIMAL_SOLUTIONS = {
 
 
 def compute_results_statistics():
+    """Compute statistics for results.csv"""
+
     df = pd.read_csv('../kmst_output/results.csv')
     df.loc[(df.solve_time >= 3599) | df.opt_gap.isna(), 'solve_time'] = float('nan')
     df_wide = pd.pivot(df, index='instance', values='solve_time', columns=['solver', 'formulation', 'tighten'])
     # Compute relative difference tighten vs. no tighten
-    df_wide['relative_difference_tighten_gurobi_mcf'] = (df_wide['gurobi']['MCF'][True] - df_wide['gurobi']['MCF'][False]) / df_wide['gurobi']['MCF'][False]
-    df_wide['relative_difference_tighten_gurobi_mtz'] = (df_wide['gurobi']['MTZ'][True] - df_wide['gurobi']['MTZ'][False]) / df_wide['gurobi']['MTZ'][False]
-    df_wide['relative_difference_tighten_gurobi_scf'] = (df_wide['gurobi']['SCF'][True] - df_wide['gurobi']['SCF'][False]) / df_wide['gurobi']['SCF'][False]
+    df_wide['relative_difference_tighten_gurobi_mcf'] = (df_wide['gurobi']['MCF'][True] - df_wide['gurobi']['MCF'][
+        False]) / df_wide['gurobi']['MCF'][False]
+    df_wide['relative_difference_tighten_gurobi_mtz'] = (df_wide['gurobi']['MTZ'][True] - df_wide['gurobi']['MTZ'][
+        False]) / df_wide['gurobi']['MTZ'][False]
+    df_wide['relative_difference_tighten_gurobi_scf'] = (df_wide['gurobi']['SCF'][True] - df_wide['gurobi']['SCF'][
+        False]) / df_wide['gurobi']['SCF'][False]
     # Compute relative difference gurobi vs. ortools
-    df_wide['relative_difference_solver_mcf'] = (df_wide['gurobi']['MCF'][True] - df_wide['ortools']['MCF'][True]) / df_wide['ortools']['MCF'][True]
-    df_wide['relative_difference_solver_mtz'] = (df_wide['gurobi']['MTZ'][True] - df_wide['ortools']['MTZ'][True]) / df_wide['ortools']['MTZ'][True]
-    df_wide['relative_difference_solver_scf'] = (df_wide['gurobi']['SCF'][True] - df_wide['ortools']['SCF'][True]) / df_wide['ortools']['SCF'][True]
+    df_wide['relative_difference_solver_mcf'] = (df_wide['gurobi']['MCF'][True] - df_wide['ortools']['MCF'][True]) / \
+                                                df_wide['ortools']['MCF'][True]
+    df_wide['relative_difference_solver_mtz'] = (df_wide['gurobi']['MTZ'][True] - df_wide['ortools']['MTZ'][True]) / \
+                                                df_wide['ortools']['MTZ'][True]
+    df_wide['relative_difference_solver_scf'] = (df_wide['gurobi']['SCF'][True] - df_wide['ortools']['SCF'][True]) / \
+                                                df_wide['ortools']['SCF'][True]
     # Compute relative difference formulations
-    df_wide['relative_difference_formulation_gurobi_mcf'] = (df_wide['gurobi']['MCF'][True] - df_wide['gurobi']['MTZ'][True]) / df_wide['gurobi']['MTZ'][True]
-    df_wide['relative_difference_formulation_gurobi_scf'] = (df_wide['gurobi']['SCF'][True] - df_wide['gurobi']['MTZ'][True]) / df_wide['gurobi']['MTZ'][True]
-    df_wide['relative_difference_formulation_ortools_mcf'] = (df_wide['ortools']['MCF'][True] - df_wide['ortools']['MTZ'][True]) / df_wide['ortools']['MTZ'][True]
-    df_wide['relative_difference_formulation_ortools_scf'] = (df_wide['ortools']['SCF'][True] - df_wide['ortools']['MTZ'][True]) / df_wide['ortools']['MTZ'][True]
+    df_wide['relative_difference_formulation_gurobi_mcf'] = (df_wide['gurobi']['MCF'][True] - df_wide['gurobi']['MTZ'][
+        True]) / df_wide['gurobi']['MTZ'][True]
+    df_wide['relative_difference_formulation_gurobi_scf'] = (df_wide['gurobi']['SCF'][True] - df_wide['gurobi']['MTZ'][
+        True]) / df_wide['gurobi']['MTZ'][True]
+    df_wide['relative_difference_formulation_ortools_mcf'] = (df_wide['ortools']['MCF'][True] -
+                                                              df_wide['ortools']['MTZ'][True]) / \
+                                                             df_wide['ortools']['MTZ'][True]
+    df_wide['relative_difference_formulation_ortools_scf'] = (df_wide['ortools']['SCF'][True] -
+                                                              df_wide['ortools']['MTZ'][True]) / \
+                                                             df_wide['ortools']['MTZ'][True]
 
     df_wide.to_csv(f'../kmst_output/results_agg.csv', index=True)
-    print(df_wide)

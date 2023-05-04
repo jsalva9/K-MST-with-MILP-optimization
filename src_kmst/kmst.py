@@ -1,26 +1,29 @@
-from src_kmst.config import Config
 from src_kmst.utils import Instance, OPTIMAL_SOLUTIONS
 from ortools.linear_solver import pywraplp
 import pandas as pd
 import networkx as nx
-from datetime import datetime
 from math import ceil
 from copy import copy
-import os, time
-from pyinstrument import Profiler
+import time
 
 
 class KMST:
-    def __init__(self, config: Config):
+    def __init__(self, config_dict: dict):
+        """
+        Initialize KMST class with config_dict. Define solver, instances, variables and results.
+
+        Args:
+            config_dict:
+        """
         self.solver = None
-        self.instance_names = config.config['instances']
-        self.formulation = config.config['formulation']
-        self.solver_name = config.config['solver']
-        self.validate_solution = config.config['validate_solution']
-        self.time_limit = config.config['time_limit']
-        self.hint_solution = config.config['hint_solution']
-        self.tighten = config.config['tighten']
-        self.data_path = config.data_path
+        self.instance_names = config_dict['instances']
+        self.formulation = config_dict['formulation']
+        self.solver_name = config_dict['solver']
+        self.validate_solution = config_dict['validate_solution']
+        self.time_limit = config_dict['time_limit']
+        self.hint_solution = config_dict['hint_solution']
+        self.tighten = config_dict['tighten']
+        self.data_path = config_dict['data_path']
 
         self.instances = {}
 
@@ -29,6 +32,9 @@ class KMST:
         self.results = pd.DataFrame()  # Dataframe with results
 
     def define_model(self):
+        """
+        Create the correspondent solver instance according to self.solver_name.
+        """
         solvers_map = {
             'ortools': 'SCIP',
             'gurobi': 'GUROBI',
@@ -38,6 +44,10 @@ class KMST:
         self.solver.set_time_limit(self.time_limit * 1000)
 
     def load_instances(self):
+        """
+        Load the graph instances stored in data_path and for each of them, create two problem instances with k = m/5
+        and k = m/2.
+        """
         # For each instance in self.instances, load the instance and create two new instances with k = m/5 and k = m/2
         for instance_name in self.instance_names:
 
@@ -52,6 +62,16 @@ class KMST:
             self.instances[instance_1.name] = instance_1
 
     def load_instance(self, instance_name: str) -> Instance:
+        """
+        Load the graph instance stored in data_path with name instance_name. Reads the file and creates an Instance
+        object.
+
+        Args:
+            instance_name: name of the instance. Example: '01', '02', '03', etc.
+
+        Returns:
+            Instance object with the graph instance.
+        """
         instance_string = str(instance_name) if len(str(instance_name)) == 2 else f'0{instance_name}'
         f = open(f'{self.data_path}/g{instance_string}.dat', 'r')
         lines = f.readlines()
@@ -69,6 +89,13 @@ class KMST:
         return Instance(f'instance_{instance_string}', n, m, Vext, Eext, weights)
 
     def define_variables(self, instance: Instance):
+        """
+        Define the variables according to the formulation. For each formulation, the variables are defined in a
+        different method.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         self.x, self.u, self.f, self.z = {}, {}, {}, {}
         if self.formulation == 'MTZ':
             self.define_variables_mtz(instance)
@@ -80,6 +107,13 @@ class KMST:
             raise ValueError('Formulation not recognized')
 
     def define_constraints(self, instance: Instance):
+        """
+        Define the constraints according to the formulation. For each formulation, the constraints are defined in a
+        different method.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         if self.formulation == 'MTZ':
             self.define_constraints_mtz(instance)
         elif self.formulation == 'SCF':
@@ -90,6 +124,12 @@ class KMST:
             raise ValueError('Formulation not recognized')
 
     def define_variables_mtz(self, instance: Instance):
+        """
+        Define the variables for the MTZ formulation.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         for (i, j) in instance.A:
             self.x[i, j] = self.solver.IntVar(0, 1, f'x_{i}_{j}')
         for i in instance.V:
@@ -97,6 +137,12 @@ class KMST:
             self.z[i] = self.solver.IntVar(0, 1, f'z_{i}')
 
     def define_constraints_mtz(self, instance: Instance):
+        """
+        Define the constraints for the MTZ formulation.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         self.solver.Add(sum(self.x[i, j] + self.x[j, i] for (i, j) in instance.E) == instance.k - 1)
         self.solver.Add(sum(self.z[i] for i in instance.V) == instance.k)
         for (i, j) in instance.A:
@@ -116,6 +162,12 @@ class KMST:
             self.solver.Add(sum(self.x[j, i] for j in instance.V if (j, i) in instance.A) <= self.z[i])
 
     def define_variables_scf(self, instance: Instance):
+        """
+        Define the variables for the SCF formulation.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         for e in instance.Eext:
             self.x[e] = self.solver.IntVar(0, 1, f'x_{e}')
         for i, j in instance.Aext:
@@ -124,6 +176,12 @@ class KMST:
             self.z[i] = self.solver.IntVar(0, 1, f'z_{i}')
 
     def define_constraints_scf(self, instance: Instance):
+        """
+        Define the constraints for the SCF formulation.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         if self.tighten:
             self.solver.Add(sum(self.x[e] for e in instance.E) == instance.k - 1)
         self.solver.Add(sum(self.z[i] for i in instance.V) == instance.k)
@@ -141,6 +199,12 @@ class KMST:
                 self.solver.Add(self.f[j, i] <= (instance.k - 1) * self.x[i, j])
 
     def define_variables_mcf(self, instance: Instance):
+        """
+        Define the variables for the MCF formulation.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         for e in instance.Eext:
             self.x[e] = self.solver.IntVar(0, 1, f'x_{e}')
         for i, j in instance.Aext:
@@ -150,6 +214,12 @@ class KMST:
             self.z[i] = self.solver.IntVar(0, 1, f'z_{i}')
 
     def define_constraints_mcf(self, instance: Instance):
+        """
+        Define the constraints for the MCF formulation.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         if self.tighten:
             self.solver.Add(sum(self.x[e] for e in instance.E) == instance.k - 1)
         self.solver.Add(sum(self.z[i] for i in instance.V) == instance.k)
@@ -179,6 +249,11 @@ class KMST:
                         self.f[j, i, l] for j in instance.Vext if (j, i) in instance.Aext) == 0)
 
     def define_objective(self, instance: Instance):
+        """
+        Define the objective function for each formulation.
+        Args:
+            instance: Instance object with the problem instance.
+        """
         if self.formulation == 'MTZ':
             self.solver.Minimize(sum(self.x[i, j] * instance.weights[i, j] for (i, j) in instance.A))
         elif self.formulation == 'SCF' or self.formulation == 'MCF':
@@ -186,7 +261,13 @@ class KMST:
         else:
             raise ValueError('Formulation not recognized')
 
-    def solve(self, instance: Instance):
+    def solve(self):
+        """
+        Solve the problem instance. The solver is called here. Print the status of the solution and the time it took
+
+        Returns:
+            Triple: (True iff optimally solved, solve_time, status integer code)
+        """
         a = time.time()
         status = self.solver.Solve()
         solve_time = time.time() - a
@@ -198,6 +279,14 @@ class KMST:
         return False, solve_time, status
 
     def validate(self, instance: Instance):
+        """
+        Validate the solution obtained by the solver. If not self.validate_solution, do nothing.
+        Otherwise, check if objective is equal to the theorital objective.
+        If self.validate_solution == 'hard', check the solution subgraph structure: nodes, edges, connectivity...
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         if not self.validate_solution:
             return
         # Check if the optimal value is the same as the one obtained by the solver
@@ -247,6 +336,15 @@ class KMST:
         print('-' * 5, 'End validation', '-' * 5)
 
     def write_results(self, instance: Instance, solve_time: float, status: int):
+        """
+        Create a dataframe with the results of the execution, and append it to the results list
+        (will later be concatenated)
+
+        Args:
+            instance: Instance object with the problem instance.
+            solve_time: Time it took to solve the instance (seconds).
+            status: Integer code of the status of the solution.
+        """
         if status == pywraplp.Solver.NOT_SOLVED:
             opt_gap = float('nan')
         else:
@@ -277,21 +375,29 @@ class KMST:
         self.results = pd.concat([self.results, run_results], ignore_index=True)
 
     def define_hints(self, instance: Instance):
+        """
+        WARNING: Under development. Define hints for the solver to start with a solution.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         tree = instance.find_tree()
         if self.formulation == 'MTZ':
             self.solver.SetHint([self.z[i] for i in instance.V], [1 if i in tree else 0 for i in instance.V])
             self.solver.SetHint([self.x[i, j] for (i, j) in instance.A],
                                 [1 if i in tree and j in tree else 0 for (i, j) in instance.A])
-        # else:
-        #     for (i, j) in instance.E:
-        #         if i in tree and j in tree:
-        #             self.solver.SetHint(self.x[i, j], 1)
+        elif self.formulation in ['SCF', 'MCF']:
+            # Error not implemented
+            raise NotImplementedError
 
     def run(self):
+        """
+        Load the instances, defne the model, variables, constraints, objective, and solve the problem. Validate the
+        solution and write the results to a dataframe. Prints the results to the console.
+        """
+
         self.load_instances()
         for instance_name, instance in self.instances.items():
-            if instance_name[-1] == '0':
-                continue
             print(f'\nRunning instance {instance_name} with {self.formulation}. Solver: {self.solver_name}, tighten: {self.tighten}')
             self.define_model()
             self.define_variables(instance)
@@ -300,50 +406,9 @@ class KMST:
             print(f' - building model took {self.solver.WallTime() / 1000} seconds')
             if self.hint_solution:
                 self.define_hints(instance)
-            feasible, solve_time, status = self.solve(instance)
+            feasible, solve_time, status = self.solve()
             if feasible:
                 self.validate(instance)
             self.write_results(instance, solve_time, status)
         print(self.results)
 
-
-if __name__ == '__main__':
-    config = Config()
-    prof = Profiler()
-    prof.start()
-
-    formulations = ['MCF']
-    tighten_vals = [False]
-    results = []
-
-    for formulation in formulations:
-        for tighten in tighten_vals:
-            config.set_formulation(formulation)
-            config.set_tighten(tighten)
-            kmst = KMST(config)
-            kmst.run()
-            results.append(kmst.results)
-            kmst.results.to_csv(f'{config.output_path}/temp_{formulation}_{tighten}.csv', index=False)
-
-    # Print results with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    results = pd.concat(results)
-
-    # Delete temp files
-    for formulation in formulations:
-        for tighten in tighten_vals:
-            os.remove(f'{config.output_path}/temp_{formulation}_{tighten}.csv')
-
-    results.to_csv(f'{config.output_path}/{timestamp}.csv', index=False)
-
-    # Open results.csv
-    aux = pd.read_csv(f'{config.output_path}/results.csv')
-    results = pd.concat([aux, results])
-    results.drop_duplicates(['instance', 'solver', 'tighten', 'formulation'], inplace=True, keep='last')
-    results.to_csv(f'{config.output_path}/results.csv', index=False)
-
-    prof.stop()
-    prof.print()
-
-    # from src_kmst.utils import compute_results_statistics
-    # compute_results_statistics()
