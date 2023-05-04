@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Set, Tuple, Dict
-
+import pandas as pd
 
 @dataclass
 class Instance:
@@ -40,8 +40,6 @@ class Instance:
         return tree
 
 
-
-
 OPTIMAL_SOLUTIONS = {
     '1_0': 46, '1_1': 477, '2_0': 373, '2_1': 1390,
     '3_0': 725, '3_1': 3074, '4_0': 909, '4_1': 3292,
@@ -49,3 +47,25 @@ OPTIMAL_SOLUTIONS = {
     '7_0': 1335, '7_1': 4534, '8_0': 1620, '8_1': 5787,
     '9_0': 2289, '9_1': 7595, '10_0': 4182, '10_1': 14991,
 }
+
+
+def compute_results_statistics():
+    df = pd.read_csv('../kmst_output/results.csv')
+    df.loc[(df.solve_time >= 3599) | df.opt_gap.isna(), 'solve_time'] = float('nan')
+    df_wide = pd.pivot(df, index='instance', values='solve_time', columns=['solver', 'formulation', 'tighten'])
+    # Compute relative difference tighten vs. no tighten
+    df_wide['relative_difference_tighten_gurobi_mcf'] = (df_wide['gurobi']['MCF'][True] - df_wide['gurobi']['MCF'][False]) / df_wide['gurobi']['MCF'][False]
+    df_wide['relative_difference_tighten_gurobi_mtz'] = (df_wide['gurobi']['MTZ'][True] - df_wide['gurobi']['MTZ'][False]) / df_wide['gurobi']['MTZ'][False]
+    df_wide['relative_difference_tighten_gurobi_scf'] = (df_wide['gurobi']['SCF'][True] - df_wide['gurobi']['SCF'][False]) / df_wide['gurobi']['SCF'][False]
+    # Compute relative difference gurobi vs. ortools
+    df_wide['relative_difference_solver_mcf'] = (df_wide['gurobi']['MCF'][True] - df_wide['ortools']['MCF'][True]) / df_wide['ortools']['MCF'][True]
+    df_wide['relative_difference_solver_mtz'] = (df_wide['gurobi']['MTZ'][True] - df_wide['ortools']['MTZ'][True]) / df_wide['ortools']['MTZ'][True]
+    df_wide['relative_difference_solver_scf'] = (df_wide['gurobi']['SCF'][True] - df_wide['ortools']['SCF'][True]) / df_wide['ortools']['SCF'][True]
+    # Compute relative difference formulations
+    df_wide['relative_difference_formulation_gurobi_mcf'] = (df_wide['gurobi']['MCF'][True] - df_wide['gurobi']['MTZ'][True]) / df_wide['gurobi']['MTZ'][True]
+    df_wide['relative_difference_formulation_gurobi_scf'] = (df_wide['gurobi']['SCF'][True] - df_wide['gurobi']['MTZ'][True]) / df_wide['gurobi']['MTZ'][True]
+    df_wide['relative_difference_formulation_ortools_mcf'] = (df_wide['ortools']['MCF'][True] - df_wide['ortools']['MTZ'][True]) / df_wide['ortools']['MTZ'][True]
+    df_wide['relative_difference_formulation_ortools_scf'] = (df_wide['ortools']['SCF'][True] - df_wide['ortools']['MTZ'][True]) / df_wide['ortools']['MTZ'][True]
+
+    df_wide.to_csv(f'../kmst_output/results_agg.csv', index=True)
+    print(df_wide)

@@ -193,9 +193,9 @@ class KMST:
         if status == pywraplp.Solver.OPTIMAL:
             print(f' - solved with objective {self.solver.Objective().Value()}')
             print(f' - solved in {self.solver.WallTime() / 1000} s')
-            return True, solve_time
+            return True, solve_time, status
         print(f' - not solved. Status: {status}')
-        return False, solve_time
+        return False, solve_time, status
 
     def validate(self, instance: Instance):
         if not self.validate_solution:
@@ -246,8 +246,8 @@ class KMST:
 
         print('-' * 5, 'End validation', '-' * 5)
 
-    def write_results(self, instance: Instance, solve_time: float):
-        if self.solver.Solve() == pywraplp.Solver.NOT_SOLVED:
+    def write_results(self, instance: Instance, solve_time: float, status: int):
+        if status == pywraplp.Solver.NOT_SOLVED:
             opt_gap = float('nan')
         else:
             opt_gap = round((self.solver.Objective().Value() - OPTIMAL_SOLUTIONS[instance.name]) / OPTIMAL_SOLUTIONS[instance.name], 4)
@@ -290,7 +290,7 @@ class KMST:
     def run(self):
         self.load_instances()
         for instance_name, instance in self.instances.items():
-            if instance_name[-1] == '1':
+            if instance_name[-1] == '0':
                 continue
             print(f'\nRunning instance {instance_name} with {self.formulation}. Solver: {self.solver_name}, tighten: {self.tighten}')
             self.define_model()
@@ -300,10 +300,10 @@ class KMST:
             print(f' - building model took {self.solver.WallTime() / 1000} seconds')
             if self.hint_solution:
                 self.define_hints(instance)
-            feasible, solve_time = self.solve(instance)
+            feasible, solve_time, status = self.solve(instance)
             if feasible:
                 self.validate(instance)
-            self.write_results(instance, solve_time)
+            self.write_results(instance, solve_time, status)
         print(self.results)
 
 
@@ -312,8 +312,8 @@ if __name__ == '__main__':
     prof = Profiler()
     prof.start()
 
-    formulations = ['MTZ']
-    tighten_vals = [True, False]
+    formulations = ['MCF']
+    tighten_vals = [False]
     results = []
 
     for formulation in formulations:
@@ -344,3 +344,6 @@ if __name__ == '__main__':
 
     prof.stop()
     prof.print()
+
+    # from src_kmst.utils import compute_results_statistics
+    # compute_results_statistics()
