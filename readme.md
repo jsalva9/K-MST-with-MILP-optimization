@@ -37,6 +37,8 @@ pip install -r requirements.txt
 conda install --file requirements.txt
 ```
 
+The directory `problems` contains the LP or MILP solutions of some other simple problems: TSP, Minimum Steiner Tree, a league / court scheduling problem...
+
 ## Configuration file
 The configuration file `config.yaml` is split into 3 sections:
 - `basic`: contains the basic parameters of the program
