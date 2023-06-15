@@ -1,10 +1,14 @@
-from src_kmst.utils import Instance, OPTIMAL_SOLUTIONS
+from src_kmst.utils import Instance, OPTIMAL_SOLUTIONS, find_cycle
 from ortools.linear_solver import pywraplp
 import pandas as pd
 import networkx as nx
+import numpy as np
 from math import ceil
 from copy import copy
 import time
+import itertools
+import gurobipy as gp
+from gurobipy import GRB
 
 
 class KMST:
@@ -24,6 +28,10 @@ class KMST:
         self.hint_solution = config_dict['hint_solution']
         self.tighten = config_dict['tighten']
         self.data_path = config_dict['data_path']
+        self.cuts = config_dict['cuts']
+        self.exp_form = ['CEC', 'DCC']
+
+        self.start_time = time.time()
 
         self.instances = {}
 
@@ -40,8 +48,15 @@ class KMST:
             'gurobi': 'GUROBI',
             'cplex': 'CPLEX'
         }
-        self.solver = pywraplp.Solver.CreateSolver(solvers_map[self.solver_name])
-        self.solver.set_time_limit(self.time_limit * 1000)
+        if self.formulation in self.exp_form:
+            assert self.solver_name == 'gurobi', \
+                f'Only gurobi solver is available for the exponential formulations {self.exp_form}.'
+            self.solver = gp.Model('KMST')
+            self.solver.setParam('TimeLimit', self.time_limit)
+            self.solver.Params.LazyConstraints = 1
+        else:
+            self.solver = pywraplp.Solver.CreateSolver(solvers_map[self.solver_name])
+            self.solver.set_time_limit(self.time_limit * 1000)
 
     def load_instances(self):
         """
@@ -103,6 +118,8 @@ class KMST:
             self.define_variables_scf(instance)
         elif self.formulation == 'MCF':
             self.define_variables_mcf(instance)
+        elif self.formulation == 'CEC':
+            self.define_variables_cec(instance)
         else:
             raise ValueError('Formulation not recognized')
 
@@ -120,8 +137,63 @@ class KMST:
             self.define_constraints_scf(instance)
         elif self.formulation == 'MCF':
             self.define_constraints_mcf(instance)
+        elif self.formulation == 'CEC':
+            self.define_constraints_cec(instance)
         else:
             raise ValueError('Formulation not recognized')
+
+    def define_variables_cec(self, instance: Instance):
+        for e in instance.A:
+            self.x[e] = self.solver.addVar(lb=0, ub=1, obj=instance.weights[e], vtype=GRB.BINARY, name='x_{e}')
+        for i in instance.V:
+            self.z[i] = self.solver.addVar(lb=0, ub=1, obj=0, vtype=GRB.BINARY, name='z_{i}')
+        self.solver._x = self.x
+        self.solver._z = self.z
+
+    def define_constraints_cec(self, instance: Instance):
+        self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E) == instance.k - 1)
+        self.solver.addConstr(gp.quicksum(self.z[i] for i in instance.V) == instance.k)
+
+        for i in instance.V:
+            self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i) <= (instance.k - 1) * self.z[i])
+            self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i))
+
+    @staticmethod
+    def cycle_elimination_constraint_fractional(model: gp.Model, where):
+        if (where == GRB.Callback.MIPNODE) and model.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
+            x = model.cbGetNodeRel(model._x)
+        else:
+            return
+        # Find the shortest cycle in the selected edges
+        cycle = find_cycle(x)
+        if cycle is not None:
+            # Add lazy constraint to the model
+            model.cbLazy(gp.quicksum(model._x[e] for e in cycle) <= len(cycle) - 1)
+
+    @staticmethod
+    def cycle_elimination_constraint(model: gp.Model, where):
+        if where != GRB.Callback.MIPSOL:
+            return
+        x = model.cbGetSolution(model._x)
+        # Find the shortest cycle in the selected edges
+        cycle = find_cycle(x)
+        if cycle is not None:
+            # Add lazy constraint to the model
+            model.cbLazy(gp.quicksum(model._x[e] for e in cycle) <= len(cycle) - 1)
+
+    @staticmethod
+    def cycle_elimination_constraint_both(model: gp.Model, where):
+        if (where == GRB.Callback.MIPNODE) and model.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
+            x = model.cbGetNodeRel(model._x)
+        elif where == GRB.Callback.MIPSOL and False:
+            x = model.cbGetSolution(model._x)
+        else:
+            return
+        # Find the shortest cycle in the selected edges
+        cycle = find_cycle(x)
+        if cycle is not None:
+            # Add lazy constraint to the model
+            model.cbLazy(gp.quicksum(model._x[e] for e in cycle) <= len(cycle) - 1)
 
     def define_variables_mtz(self, instance: Instance):
         """
@@ -256,8 +328,11 @@ class KMST:
         """
         if self.formulation == 'MTZ':
             self.solver.Minimize(sum(self.x[i, j] * instance.weights[i, j] for (i, j) in instance.A))
-        elif self.formulation == 'SCF' or self.formulation == 'MCF':
+        elif self.formulation in ['SCF', 'MCF']:
             self.solver.Minimize(sum(self.x[e] * instance.weights[e] for e in instance.E))
+        elif self.formulation in self.exp_form:
+            # Already defined as the coefficients of the variables
+            pass
         else:
             raise ValueError('Formulation not recognized')
 
@@ -266,19 +341,33 @@ class KMST:
         Solve the problem instance. The solver is called here. Print the status of the solution and the time it took
 
         Returns:
-            Triple: (True iff optimally solved, solve_time, status integer code)
+            Triple: (True iff optimally solved, solve_time, status integer code, objective value)
         """
         a = time.time()
-        status = self.solver.Solve()
-        solve_time = time.time() - a
-        if status == pywraplp.Solver.OPTIMAL:
-            print(f' - solved with objective {self.solver.Objective().Value()}')
-            print(f' - solved in {self.solver.WallTime() / 1000} s')
-            return True, solve_time, status
-        print(f' - not solved. Status: {status}')
-        return False, solve_time, status
+        if self.formulation in self.exp_form:
+            if self.cuts == 'fractional':
+                self.solver.optimize(self.cycle_elimination_constraint_fractional)
+            elif self.cuts == 'integral':
+                self.solver.optimize(self.cycle_elimination_constraint)
+            else:
+                self.solver.optimize(self.cycle_elimination_constraint_both)
+            status = self.solver.status
+            objective = self.solver.ObjVal
+            optimal = status == GRB.OPTIMAL
+        else:
+            status = self.solver.Solve()
+            objective = self.solver.Objective().Value()
+            optimal = status == pywraplp.Solver.OPTIMAL
 
-    def validate(self, instance: Instance):
+        solve_time = time.time() - a
+        if optimal:
+            print(f' - solved with objective {objective}')
+            print(f' - solved in {solve_time} s')
+            return True, solve_time, status, objective
+        print(f' - not solved. Status: {status} (solver = {self.solver_name})')
+        return False, solve_time, status, objective
+
+    def validate(self, instance: Instance, objective: float):
         """
         Validate the solution obtained by the solver. If not self.validate_solution, do nothing.
         Otherwise, check if objective is equal to the theorital objective.
@@ -286,11 +375,12 @@ class KMST:
 
         Args:
             instance: Instance object with the problem instance.
+            objective: Objective value obtained by the solver.
         """
         if not self.validate_solution:
             return
         # Check if the optimal value is the same as the one obtained by the solver
-        equal = round(self.solver.Objective().Value()) == OPTIMAL_SOLUTIONS[instance.name]
+        equal = round(objective) == OPTIMAL_SOLUTIONS[instance.name]
         print(f' - solved with optimal value: {equal}')
         if self.validate_solution != 'hard':
             return
@@ -310,6 +400,12 @@ class KMST:
             for e in instance.E:
                 if self.x[e].solution_value() == 1:
                     G.add_edge(*e)
+        elif self.formulation in ['CEC']:
+            x_vals = self.solver.getAttr('X', self.x)
+            for e in instance.E:
+                if x_vals[e] == 1:
+                    G.add_edge(*e)
+
         # Check if the solution is a tree
         print(f'Subgraph nodes: {G.nodes()}')
         print(f'Subgraph edges: {G.edges()}')
@@ -329,13 +425,13 @@ class KMST:
                         if self.f[i, j, l].solution_value()}
             print(f'Subgraph f values: {f_values}')
             node_sums = {(i, l): sum(self.f[i, j, l].solution_value() for j in instance.Vext if (i, j) in instance.Aext) - sum(
-                        self.f[j, i, l].solution_value() for j in instance.Vext if (j, i) in instance.Aext)
+                self.f[j, i, l].solution_value() for j in instance.Vext if (j, i) in instance.Aext)
                          for i in instance.Vext for l in instance.V}
             print(f"Subgraph node sums: { {k: v for k, v in node_sums.items() if v != 0} }")
 
         print('-' * 5, 'End validation', '-' * 5)
 
-    def write_results(self, instance: Instance, solve_time: float, status: int):
+    def write_results(self, instance: Instance, solve_time: float, status: int, objective: float):
         """
         Create a dataframe with the results of the execution, and append it to the results list
         (will later be concatenated)
@@ -344,11 +440,14 @@ class KMST:
             instance: Instance object with the problem instance.
             solve_time: Time it took to solve the instance (seconds).
             status: Integer code of the status of the solution.
+            objective: Objective value obtained by the solver.
+
         """
-        if status == pywraplp.Solver.NOT_SOLVED:
+        if (self.formulation in self.exp_form and status != GRB.OPTIMAL) or \
+                (self.formulation not in self.exp_form and status == pywraplp.Solver.NOT_SOLVED):
             opt_gap = float('nan')
         else:
-            opt_gap = round((self.solver.Objective().Value() - OPTIMAL_SOLUTIONS[instance.name]) / OPTIMAL_SOLUTIONS[instance.name], 4)
+            opt_gap = round((objective - OPTIMAL_SOLUTIONS[instance.name]) / OPTIMAL_SOLUTIONS[instance.name], 4)
         d = {
             'instance': instance.name,
             'n': instance.n,
@@ -357,16 +456,17 @@ class KMST:
             'formulation': self.formulation,
             'define_hints': self.hint_solution,
             'solver': self.solver_name,
-            'objective': self.solver.Objective().Value(),
-            'time': self.solver.WallTime() / 1000,
-            'nodes': self.solver.nodes(),
-            'iterations': self.solver.iterations(),
+            'objective': objective,
+            'time': time.time() - self.start_time,
+            'nodes': self.solver.nodes() if self.formulation not in self.exp_form else self.solver.NodeCount,
+            'iterations': self.solver.iterations() if self.formulation not in self.exp_form else self.solver.IterCount,
             'time_limit': self.time_limit,
-            'best_bound': self.solver.Objective().BestBound(),
-            'status': self.solver.Solve(),
+            'best_bound': self.solver.Objective().BestBound() if self.formulation not in self.exp_form else self.solver.ObjBound,
+            'status': status,
             'theoretical_optimal': OPTIMAL_SOLUTIONS[instance.name],
             'opt_gap': opt_gap,
             'tighten': self.tighten,
+            'cuts_fractional': self.cuts,
             'solve_time': solve_time
         }
         if not len(self.results):
@@ -399,16 +499,18 @@ class KMST:
         self.load_instances()
         for instance_name, instance in self.instances.items():
             print(f'\nRunning instance {instance_name} with {self.formulation}. Solver: {self.solver_name}, tighten: {self.tighten}')
+            if self.formulation == 'CEC':
+                print(f'Cutting planes: {self.cuts}')
             self.define_model()
             self.define_variables(instance)
             self.define_constraints(instance)
             self.define_objective(instance)
-            print(f' - building model took {self.solver.WallTime() / 1000} seconds')
+            print(f' - building model took {time.time() - self.start_time} seconds')
             if self.hint_solution:
                 self.define_hints(instance)
-            feasible, solve_time, status = self.solve()
+            feasible, solve_time, status, objective = self.solve()
             if feasible:
-                self.validate(instance)
-            self.write_results(instance, solve_time, status)
+                self.validate(instance, objective)
+            self.write_results(instance, solve_time, status, objective)
         print(self.results)
 

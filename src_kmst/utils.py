@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Set, Tuple, Dict
 import pandas as pd
+import networkx as nx
 
 
 @dataclass
@@ -95,3 +96,15 @@ def compute_results_statistics():
                                                              df_wide['ortools']['MTZ'][True]
 
     df_wide.to_csv(f'../kmst_output/results_agg.csv', index=True)
+
+
+def find_cycle(x):
+    # Find a cycle in a list of edges using networkx
+    G = nx.Graph()
+    G.add_edges_from([k for k, v in x.items() if v > 0.5])
+    try:
+        cycle = nx.find_cycle(G)
+        cycle = [e if e[0] < e[1] else (e[1], e[0]) for e in cycle]
+        return cycle
+    except nx.NetworkXNoCycle:
+        return None
