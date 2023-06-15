@@ -1,12 +1,13 @@
-from src_kmst.utils import Instance, OPTIMAL_SOLUTIONS, find_cycle
+from src_kmst.utils import Instance, OPTIMAL_SOLUTIONS
+from src_kmst.lazy_constraints import cycle_elimination_constraint_fractional, cycle_elimination_constraint, \
+    cycle_elimination_constraint_both, directed_cutset_constraint_fractional, directed_cutset_constraint, \
+    directed_cutset_constraint_both
 from ortools.linear_solver import pywraplp
 import pandas as pd
 import networkx as nx
-import numpy as np
 from math import ceil
 from copy import copy
 import time
-import itertools
 import gurobipy as gp
 from gurobipy import GRB
 
@@ -120,6 +121,8 @@ class KMST:
             self.define_variables_mcf(instance)
         elif self.formulation == 'CEC':
             self.define_variables_cec(instance)
+        elif self.formulation == 'DCC':
+            self.define_variables_dcc(instance)
         else:
             raise ValueError('Formulation not recognized')
 
@@ -139,11 +142,21 @@ class KMST:
             self.define_constraints_mcf(instance)
         elif self.formulation == 'CEC':
             self.define_constraints_cec(instance)
+        elif self.formulation == 'DCC':
+            self.define_constraints_dcc(instance)
         else:
             raise ValueError('Formulation not recognized')
 
     def define_variables_cec(self, instance: Instance):
         for e in instance.A:
+            self.x[e] = self.solver.addVar(lb=0, ub=1, obj=instance.weights[e], vtype=GRB.BINARY, name='x_{e}')
+        for i in instance.V:
+            self.z[i] = self.solver.addVar(lb=0, ub=1, obj=0, vtype=GRB.BINARY, name='z_{i}')
+        self.solver._x = self.x
+        self.solver._z = self.z
+
+    def define_variables_dcc(self, instance: Instance):
+        for e in instance.Aext:
             self.x[e] = self.solver.addVar(lb=0, ub=1, obj=instance.weights[e], vtype=GRB.BINARY, name='x_{e}')
         for i in instance.V:
             self.z[i] = self.solver.addVar(lb=0, ub=1, obj=0, vtype=GRB.BINARY, name='z_{i}')
@@ -158,42 +171,15 @@ class KMST:
             self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i) <= (instance.k - 1) * self.z[i])
             self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i))
 
-    @staticmethod
-    def cycle_elimination_constraint_fractional(model: gp.Model, where):
-        if (where == GRB.Callback.MIPNODE) and model.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
-            x = model.cbGetNodeRel(model._x)
-        else:
-            return
-        # Find the shortest cycle in the selected edges
-        cycle = find_cycle(x)
-        if cycle is not None:
-            # Add lazy constraint to the model
-            model.cbLazy(gp.quicksum(model._x[e] for e in cycle) <= len(cycle) - 1)
+    def define_constraints_dcc(self, instance: Instance):
+        self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E) == instance.k - 1)
+        self.solver.addConstr(gp.quicksum(self.z[i] for i in instance.V) == instance.k)
+        self.solver.addConstr(gp.quicksum(self.x[(0, i)] for i in instance.V) == 1)
+        self.solver.addConstr(gp.quicksum(self.x[(i, 0)] for i in instance.V) == 0)
 
-    @staticmethod
-    def cycle_elimination_constraint(model: gp.Model, where):
-        if where != GRB.Callback.MIPSOL:
-            return
-        x = model.cbGetSolution(model._x)
-        # Find the shortest cycle in the selected edges
-        cycle = find_cycle(x)
-        if cycle is not None:
-            # Add lazy constraint to the model
-            model.cbLazy(gp.quicksum(model._x[e] for e in cycle) <= len(cycle) - 1)
-
-    @staticmethod
-    def cycle_elimination_constraint_both(model: gp.Model, where):
-        if (where == GRB.Callback.MIPNODE) and model.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
-            x = model.cbGetNodeRel(model._x)
-        elif where == GRB.Callback.MIPSOL and False:
-            x = model.cbGetSolution(model._x)
-        else:
-            return
-        # Find the shortest cycle in the selected edges
-        cycle = find_cycle(x)
-        if cycle is not None:
-            # Add lazy constraint to the model
-            model.cbLazy(gp.quicksum(model._x[e] for e in cycle) <= len(cycle) - 1)
+        for i in instance.V:
+            self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i) <= (instance.k - 1) * self.z[i])
+            # self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.E if e[1] == i))
 
     def define_variables_mtz(self, instance: Instance):
         """
@@ -345,15 +331,7 @@ class KMST:
         """
         a = time.time()
         if self.formulation in self.exp_form:
-            if self.cuts == 'fractional':
-                self.solver.optimize(self.cycle_elimination_constraint_fractional)
-            elif self.cuts == 'integral':
-                self.solver.optimize(self.cycle_elimination_constraint)
-            else:
-                self.solver.optimize(self.cycle_elimination_constraint_both)
-            status = self.solver.status
-            objective = self.solver.ObjVal
-            optimal = status == GRB.OPTIMAL
+            objective, optimal, status = self.solve_with_cuts()
         else:
             status = self.solver.Solve()
             objective = self.solver.Objective().Value()
@@ -366,6 +344,21 @@ class KMST:
             return True, solve_time, status, objective
         print(f' - not solved. Status: {status} (solver = {self.solver_name})')
         return False, solve_time, status, objective
+
+    def solve_with_cuts(self):
+        func_dict = {
+            ('CEC', 'fractional'): cycle_elimination_constraint_fractional,
+            ('CEC', 'integral'): cycle_elimination_constraint,
+            ('CEC', 'both'): cycle_elimination_constraint_both,
+            ('DCC', 'fractional'): directed_cutset_constraint_fractional,
+            ('DCC', 'integral'): directed_cutset_constraint,
+            ('DCC', 'both'): directed_cutset_constraint_both
+        }
+        self.solver.optimize(func_dict[(self.formulation, self.cuts)])
+        status = self.solver.status
+        objective = self.solver.ObjVal
+        optimal = status == GRB.OPTIMAL
+        return objective, optimal, status
 
     def validate(self, instance: Instance, objective: float):
         """
