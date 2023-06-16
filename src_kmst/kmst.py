@@ -546,7 +546,8 @@ class KMST:
         for instance_name, instance in self.instances.items():
             print(f'\nRunning instance {instance_name} with {self.formulation}. Solver: {self.solver_name}, tighten: {self.tighten}')
             if self.formulation == 'CEC':
-                print(f'Cutting planes: {self.cuts}')
+                print(f'Cutting planes: {self.cuts}. Hint solution: {self.hint_solution}')
+
             self.define_model()
             self.define_variables(instance)
             self.define_constraints(instance)
