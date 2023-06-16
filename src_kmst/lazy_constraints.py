@@ -16,34 +16,46 @@ def find_cycle(x):
 
 
 def find_partition(x, z):
-    # Find some vertex i and a partition of the nodes V = W + V \ W such that:
-    #   - W contains the root node 0
-    #   - W does not contain the vertex i
-    #   - outgoing edges e of W satisfy (sum(x[e] for e in outgoing) < z[i])
-    # Returns:
-    #   outgoing_e (list): list of outgoing edges of the set W
-    #   i (node): one such vertex
+    # Find some vertex i and a partition of the nodes V = W_0 + W_1 such that:
+    #   - W_0 contains the root node 0
+    #   - W_1 contains node i
+    #   - outgoing edges W_0 -> W_1 satisfy (sum(x[e] for e in outgoing) == 0 < z[i] == 1)
 
-    # Create graph
-    G = nx.DiGraph()
-
-    # Add edges that are in the solution
-    G.add_edges_from([k for k, v in x.items() if v > 0.5])
+    # Create graph with edges in the current solution
+    G = nx.DiGraph([k for k, v in x.items() if v > 0.5])
 
     # For every node i such that y_i = 1, check if there is a path from 0 to i
     for i in [i for i, v in z.items() if v > 0.5]:
+        assert 0 in G.nodes, 'Root node 0 is not in the graph'
+        assert i in G.nodes, 'Node i is not in the graph'
         if nx.has_path(G, 0, i):
             continue
-        # Found a node i such that there is no path from 0 to i -> there is a partition whose edges values are 0
-        Gaux = nx.Graph()
-        Gaux.add_weighted_edges_from([(k[0], k[1], v) for k, v in x.items()])
 
-        # Find a 0->i min-cut. We know that must have value = len(outgoing_e) because we added 1 to all edges
-        cut_value, partition = nx.minimum_cut(Gaux, 0, i)
-        # Finally find all edges that are in the cut
-        outgoing_e = [(u, v) for u, v in Gaux.edges if u in partition[0] and v in partition[1]]
-        assert sum([x[e] for e in outgoing_e]) == len(outgoing_e), 'CUT VALUE IS NOT ZERO'
+        # DFS from 0
+        nodes = set(nx.dfs_postorder_nodes(G, 0))
+        assert i not in nodes, 'Node i is reachable from 0!'
+        W_1 = [v for v in z.keys() if v not in nodes]
+        W_0 = [v for v in z.keys() if v not in W_1] + [0]
+
+        outgoing_e = [(u, v) for u, v in x.keys() if u in W_0 and v in W_1]
+        assert round(sum([x[e] for e in outgoing_e]), 4) == 0, 'Cut value is not zero'
+
         return outgoing_e, i
+    return None, None
+
+
+def find_min_cut(x, z):
+    G = nx.DiGraph()
+    G.add_weighted_edges_from([(k[0], k[1], v) for k, v in x.items()])
+    # Print min and max weight of edges by accessing G attributes
+    for i in z.keys():
+        flow = nx.maximum_flow_value(G, 0, i, capacity='weight')
+        if flow < z[i] - 0.0001:
+            val, partition = nx.minimum_cut(G, 0, i, capacity='weight')
+            outgoing_e = [(u, v) for u, v in x.keys() if u in partition[0] and v in partition[1]]
+            assert round(sum([x[e] for e in outgoing_e]), 4) == 0, 'Cut value is not zero'
+            assert round(z[i], 4) == 1, 'z value is not one'
+            return outgoing_e, i
     return None, None
 
 
@@ -99,7 +111,7 @@ def directed_cutset_constraint_both(model: gp.Model, where):
 
 
 def add_cutset(model: gp.Model, x, z):
-    outgoing_e, i = find_partition(x, z)
+    outgoing_e, i = find_min_cut(x, z)
     if i is not None:
         # Add lazy constraint to the model
         model.cbLazy(gp.quicksum(model._x[e] for e in outgoing_e) >= model._z[i])

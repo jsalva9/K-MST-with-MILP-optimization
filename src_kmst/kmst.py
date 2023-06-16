@@ -172,14 +172,19 @@ class KMST:
             self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i))
 
     def define_constraints_dcc(self, instance: Instance):
-        self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E) == instance.k - 1)
+        self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.A) == instance.k - 1)
         self.solver.addConstr(gp.quicksum(self.z[i] for i in instance.V) == instance.k)
         self.solver.addConstr(gp.quicksum(self.x[(0, i)] for i in instance.V) == 1)
-        self.solver.addConstr(gp.quicksum(self.x[(i, 0)] for i in instance.V) == 0)
 
         for i in instance.V:
-            self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i) <= (instance.k - 1) * self.z[i])
-            # self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.E if e[1] == i))
+            self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.A if i in e) <= (instance.k - 1) * self.z[i])
+            self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.A if e[1] == i) +
+                                  gp.quicksum(self.x[e] for e in instance.A if e[0] == i))
+            self.solver.addConstr(self.x[(i, 0)] == 0)
+        for e in instance.Eext:
+            if e[0] > e[1]:
+                continue
+            self.solver.addConstr(self.x[e] + self.x[e[1], e[0]] <= 1)
 
     def define_variables_mtz(self, instance: Instance):
         """
@@ -378,7 +383,7 @@ class KMST:
         if self.validate_solution != 'hard':
             return
 
-        print('-' * 5, 'Validating solution', '-' * 5)
+        print('\n', '-' * 5, 'Validating solution', '-' * 5)
         print(f'Instance n: {instance.n}')
         print(f'Instance m: {instance.m}')
         print(f'Instance k: {instance.k}')
@@ -398,10 +403,15 @@ class KMST:
             for e in instance.E:
                 if x_vals[e] == 1:
                     G.add_edge(*e)
+        elif self.formulation in ['DCC']:
+            x_vals = self.solver.getAttr('X', self.x)
+            for e in instance.A:
+                if x_vals[e] == 1:
+                    G.add_edge(*e)
 
         # Check if the solution is a tree
-        print(f'Subgraph nodes: {G.nodes()}')
-        print(f'Subgraph edges: {G.edges()}')
+        print(f'{G.number_of_nodes()} subgraph nodes: {G.nodes()}')
+        print(f'{G.number_of_edges()} subgraph edges: {G.edges()}')
         print(f'Subgraph a tree: {nx.is_tree(G)}')
         print(f'Subgraph is connected: {nx.is_connected(G)}')
         if self.formulation == 'MTZ':
@@ -474,14 +484,7 @@ class KMST:
         Args:
             instance: Instance object with the problem instance.
         """
-        tree = instance.find_tree()
-        if self.formulation == 'MTZ':
-            self.solver.SetHint([self.z[i] for i in instance.V], [1 if i in tree else 0 for i in instance.V])
-            self.solver.SetHint([self.x[i, j] for (i, j) in instance.A],
-                                [1 if i in tree and j in tree else 0 for (i, j) in instance.A])
-        elif self.formulation in ['SCF', 'MCF']:
-            # Error not implemented
-            raise NotImplementedError
+        raise NotImplementedError('Hints are not implemented yet')
 
     def run(self):
         """
