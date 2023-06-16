@@ -148,6 +148,12 @@ class KMST:
             raise ValueError('Formulation not recognized')
 
     def define_variables_cec(self, instance: Instance):
+        """
+        Define the variables for the CEC formulation.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         for e in instance.A:
             self.x[e] = self.solver.addVar(lb=0, ub=1, obj=instance.weights[e], vtype=GRB.BINARY, name='x_{e}')
         for i in instance.V:
@@ -156,6 +162,12 @@ class KMST:
         self.solver._z = self.z
 
     def define_variables_dcc(self, instance: Instance):
+        """
+        Define the variables for the DCC formulation.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         for e in instance.Aext:
             self.x[e] = self.solver.addVar(lb=0, ub=1, obj=instance.weights[e], vtype=GRB.BINARY, name='x_{e}')
         for i in instance.V:
@@ -164,6 +176,12 @@ class KMST:
         self.solver._z = self.z
 
     def define_constraints_cec(self, instance: Instance):
+        """
+        Define the constraints for the CEC formulation.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E) == instance.k - 1)
         self.solver.addConstr(gp.quicksum(self.z[i] for i in instance.V) == instance.k)
 
@@ -172,6 +190,12 @@ class KMST:
             self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i))
 
     def define_constraints_dcc(self, instance: Instance):
+        """
+        Define the constraints for the DCC formulation.
+
+        Args:
+            instance: Instance object with the problem instance.
+        """
         self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.A) == instance.k - 1)
         self.solver.addConstr(gp.quicksum(self.z[i] for i in instance.V) == instance.k)
         self.solver.addConstr(gp.quicksum(self.x[(0, i)] for i in instance.V) == 1)
@@ -332,7 +356,7 @@ class KMST:
         Solve the problem instance. The solver is called here. Print the status of the solution and the time it took
 
         Returns:
-            Triple: (True iff optimally solved, solve_time, status integer code, objective value)
+            4-tuple: (True iff optimally solved, solve_time, status integer code, objective value)
         """
         a = time.time()
         if self.formulation in self.exp_form:
@@ -351,6 +375,13 @@ class KMST:
         return False, solve_time, status, objective
 
     def solve_with_cuts(self):
+        """
+        Solve method for the formulations with exponential number of variables (CEC, DCC). The solver is called here.
+        Redirect the correct method depending on the formulation and the cut specification (fractional, integral, both).
+
+        Returns:
+            4-tuple: (True iff optimally solved, solve_time, status integer code, objective value)
+        """
         func_dict = {
             ('CEC', 'fractional'): cycle_elimination_constraint_fractional,
             ('CEC', 'integral'): cycle_elimination_constraint,

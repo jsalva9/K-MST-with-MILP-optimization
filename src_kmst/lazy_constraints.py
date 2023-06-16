@@ -3,10 +3,19 @@ from gurobipy import GRB
 import gurobipy as gp
 
 
-def find_cycle(x):
+def find_cycle(x: dict):
+    """
+    Find a cycle in the graph defined by the current solution (either integral or fractional).
+
+    Args:
+        x (dict): map edge to its value in the current solution
+
+    Returns:
+        cycle (list): list of edges in the cycle. If no cycle is found, return None.
+    """
     # Find a cycle in a list of edges using networkx
     G = nx.Graph()
-    G.add_edges_from([k for k, v in x.items() if v > 0.5])
+    G.add_edges_from([k for k, v in x.items() if v > 0.0001])
     try:
         cycle = nx.find_cycle(G)
         cycle = [e if e[0] < e[1] else (e[1], e[0]) for e in cycle]
@@ -15,36 +24,18 @@ def find_cycle(x):
         return None
 
 
-def find_partition(x, z):
-    # Find some vertex i and a partition of the nodes V = W_0 + W_1 such that:
-    #   - W_0 contains the root node 0
-    #   - W_1 contains node i
-    #   - outgoing edges W_0 -> W_1 satisfy (sum(x[e] for e in outgoing) == 0 < z[i] == 1)
+def find_min_cut(x: dict, z: dict):
+    """
+    Find a minimum cut in the graph defined by the current solution (either integral or fractional).
 
-    # Create graph with edges in the current solution
-    G = nx.DiGraph([k for k, v in x.items() if v > 0.5])
+    Args:
+        x (dict): map edge to its value in the current solution
+        z (dict): map vertex to its value in the current solution
 
-    # For every node i such that y_i = 1, check if there is a path from 0 to i
-    for i in [i for i, v in z.items() if v > 0.5]:
-        assert 0 in G.nodes, 'Root node 0 is not in the graph'
-        assert i in G.nodes, 'Node i is not in the graph'
-        if nx.has_path(G, 0, i):
-            continue
-
-        # DFS from 0
-        nodes = set(nx.dfs_postorder_nodes(G, 0))
-        assert i not in nodes, 'Node i is reachable from 0!'
-        W_1 = [v for v in z.keys() if v not in nodes]
-        W_0 = [v for v in z.keys() if v not in W_1] + [0]
-
-        outgoing_e = [(u, v) for u, v in x.keys() if u in W_0 and v in W_1]
-        assert round(sum([x[e] for e in outgoing_e]), 4) == 0, 'Cut value is not zero'
-
-        return outgoing_e, i
-    return None, None
-
-
-def find_min_cut(x, z):
+    Returns:
+        outgoing_e (list): list of edges in the minimum cut (direction 0 -> i). If no cut is found, return None.
+        i (int): vertex for which the valid inequality has been found. If no cut is found, return None.
+    """
     G = nx.DiGraph()
     G.add_weighted_edges_from([(k[0], k[1], v) for k, v in x.items()])
     # Print min and max weight of edges by accessing G attributes
@@ -60,6 +51,13 @@ def find_min_cut(x, z):
 
 
 def cycle_elimination_constraint_fractional(model: gp.Model, where):
+    """
+    Callback function for fractional solution. If a fractional solution is found, add a lazy constraint to the model.
+
+    Args:
+        model (gp.Model): Gurobi model
+        where (int): callback location
+    """
     if (where == GRB.Callback.MIPNODE) and model.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
         x = model.cbGetNodeRel(model._x)
     else:
@@ -68,6 +66,13 @@ def cycle_elimination_constraint_fractional(model: gp.Model, where):
 
 
 def cycle_elimination_constraint(model: gp.Model, where):
+    """
+    Callback function for integral solution. If an integral solution is found, add a lazy constraint to the model.
+
+    Args:
+        model (gp.Model): Gurobi model
+        where (int): callback location
+    """
     if where != GRB.Callback.MIPSOL:
         return
     x = model.cbGetSolution(model._x)
@@ -75,11 +80,27 @@ def cycle_elimination_constraint(model: gp.Model, where):
 
 
 def cycle_elimination_constraint_both(model: gp.Model, where):
+    """
+    Callback function for both fractional and integral solution.
+    If a solution is found, add a lazy constraint to the model.
+
+    Args:
+        model (gp.Model): Gurobi model
+        where (int): callback location
+    """
     cycle_elimination_constraint(model, where)
     cycle_elimination_constraint_fractional(model, where)
 
 
 def add_cec(model: gp.Model, x):
+    """
+    Search for violated cycle elimination constraint in the current solution.
+    If found, add constraint to the model in the form of a lazy constraint.
+
+    Args:
+        model (gp.Model): Gurobi model
+        x (dict): map edge to its value in the current solution
+    """
     # Find the shortest cycle in the selected edges
     cycle = find_cycle(x)
     if cycle is not None:
@@ -88,6 +109,13 @@ def add_cec(model: gp.Model, x):
 
 
 def directed_cutset_constraint(model: gp.Model, where):
+    """
+    Callback function for integral solution. If an integral solution is found, add a lazy constraint to the model.
+
+    Args:
+        model (gp.Model): Gurobi model
+        where (int): callback location
+    """
     if where != GRB.Callback.MIPSOL:
         return
     x = model.cbGetSolution(model._x)
@@ -97,6 +125,13 @@ def directed_cutset_constraint(model: gp.Model, where):
 
 
 def directed_cutset_constraint_fractional(model: gp.Model, where):
+    """
+    Callback function for fractional solution. If a fractional solution is found, add a lazy constraint to the model.
+
+    Args:
+        model (gp.Model): Gurobi model
+        where (int): callback location
+    """
     if (where == GRB.Callback.MIPNODE) and model.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
         x = model.cbGetNodeRel(model._x)
         z = model.cbGetNodeRel(model._z)
@@ -106,11 +141,28 @@ def directed_cutset_constraint_fractional(model: gp.Model, where):
 
 
 def directed_cutset_constraint_both(model: gp.Model, where):
+    """
+    Callback function for both fractional and integral solution.
+    If a solution is found, add a lazy constraint to the model.
+
+    Args:
+        model (gp.Model): Gurboi model
+        where (int): callback location
+    """
     directed_cutset_constraint(model, where)
     directed_cutset_constraint_fractional(model, where)
 
 
-def add_cutset(model: gp.Model, x, z):
+def add_cutset(model: gp.Model, x: dict, z: dict):
+    """
+    Search for violated directed cutset constraint in the current solution.
+    If found, add constraint to the model in the form of a lazy constraint.
+
+    Args:
+        model (gp.Model): Gurobi model
+        x (dict): map edge to its value in the current solution
+        z (dict): map vertex to its value in the current solution
+    """
     outgoing_e, i = find_min_cut(x, z)
     if i is not None:
         # Add lazy constraint to the model
