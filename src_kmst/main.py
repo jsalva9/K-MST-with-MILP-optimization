@@ -20,10 +20,10 @@ def multiple_exec(basic_dict: dict):
         for solver in mult_exec['solver']:
             for hint_sol in mult_exec['hint_solution']:
                 for tighten in mult_exec['tighten']:
-                    for cuts_fractional in mult_exec['cuts_fractional']:
+                    for cuts_fractional in mult_exec['cuts']:
                         config_dict = {**basic_dict,
                                        **{'formulation': formulation, 'solver': solver, 'hint_solution': hint_sol,
-                                          'tighten': tighten, 'cuts_fractional': cuts_fractional}}
+                                          'tighten': tighten, 'cuts': cuts_fractional}}
                         kmst = KMST(config_dict)
                         kmst.run()
                         results.append(kmst.results)
