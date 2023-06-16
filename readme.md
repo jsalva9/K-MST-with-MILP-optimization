@@ -4,9 +4,12 @@ In this project, we provide different MILP formulations for the k-Minimum Spanni
 - a sequential formulation (inspired by Miller, Tucker and Zemlin, MTZ)
 - a Single-Commodity Flow formulation, SCF
 - a Multi-Commodity Flow formulation, MCF
+- a Cycle Elimination Constraints formulation, CEC
+- a Directed Cutset Constraints formulation, DCC
 
 We model these formulations using ortools, and we compare their performance on a set of 10 graph instances.
 We compare the licensed solver Gurobi 10.0.1 vs SCIP v803.
+The last two formulations require the usage of a solver that supports Lazy Constraints. Only Gurobi (through the Python API `gurobipy`) was used for these formulations, even though SCIP could also have been explored. 
 
 This project is part of the lecture [186.835 Mathematical Programming](https://tiss.tuwien.ac.at/course/courseDetails.xhtml?dswid=3722&dsrid=607&courseNr=186835&semester=2021S) at the Technical University of Vienna.
 
@@ -37,7 +40,7 @@ pip install -r requirements.txt
 conda install --file requirements.txt
 ```
 
-The directory `problems` contains the LP or MILP solutions of some other simple problems: TSP, Minimum Steiner Tree, a league / court scheduling problem...
+The directory `problems` contains the LP or MILP solutions of some other simple problems: TSP, Minimum Steiner Tree, a League-Court scheduling problem, Bin Packing, Knapsack problem... Feel free to take a look :)
 
 ## Configuration file
 The configuration file `config.yaml` is split into 3 sections:
@@ -55,9 +58,11 @@ The basic parameters are the following:
 
 The parameters for a single execution and multiple executions are the same. In a single execution, just one parameter has to be specified. In a multiple execution, a list of parameters has to be specified. The parameters are the following:
 - `solver`: can be [gurobi, scip]
-- `formulation`: can be [MTZ, SCF, MCF]
-- `hint_solution`: can be [True, False]. WARNING: only works for Gurobi. Has not been properly tested.
-- `tighten`: can be [True, False]. If True, more constraints are added to the minimal formulation.
+- `formulation`: can be [MTZ, SCF, MCF, CEC, DCC]
+- `hint_solution`: can be [True, False]. WARNING: only works for CEC and DCC. If True, a MIP start is provided.
+- `tighten`: can be [True, False]. If True, more constraints are added to the minimal formulation. Does not work for CEC and DCC.
+- `cuts`: can be [integral, fractional, both]. Only applies to CEC and DCC. If integral, cuts are applied to MIP solutions. If fractional, cuts are applied to LP solutions. If both, cuts are applied to both MIP and LP solutions.
+
 
 ## Execute
 Just run the src_kmst/main.py file. The config is taken from the config.yaml file. The results will be stored in the output folder.
@@ -74,6 +79,7 @@ The results are stored in a csv file named %Y%m%d-%H%M%S.csv. The columns are th
 - `k`: number of nodes to be selected
 - `formulation`: formulation used
 - `define_hints`: True if hints are defined, False otherwise
+- `cuts`: cuts strategy applied
 - `solver`: solver used
 - `objective`: objective value
 - `time`: time to formulate and solve the problem
