@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Set, Tuple, Dict
 import pandas as pd
+import networkx as nx
 
 
 @dataclass
@@ -32,25 +33,32 @@ class Instance:
 
     def find_tree(self):
         """
-        Find a tree with k vertices in the graph. The tree is found by performing a BFS from vertex 1.
+        Find a tree with k vertices in the graph. We consider as many trees as the number of vertices in the graph.
+        For each vertex, we run DFS to find a connected k-subset of vertices containing it. Then, we find the minimum
+         spanning tree of the subset using networkx. Finally return the minimum spanning tree with the smallest cost.
 
         Returns:
-            tree (set): set of vertices in the tree
+            tree (nx.Graph): k-subtree
         """
-        start = 1
-        tree = {start}
-        visited = {i: False for i in self.V}
-        q = [start]
-        while len(q) > 0:
-            u = q.pop(0)
-            tree.add(u)
-            if len(tree) == self.k:
-                return tree
-            visited[u] = True
-            for v in self.V:
-                if (u, v) in self.E and not visited[v]:
-                    q.append(v)
-        return tree
+        g = nx.Graph()
+        g.add_nodes_from(self.V)
+        g.add_weighted_edges_from([(e[0], e[1], self.weights[e]) for e in self.E])
+
+        best_tree, best_tree_cost = None, float('inf')
+        for i in self.V:
+            dfs_nodes = list(nx.dfs_preorder_nodes(g, source=i))[:self.k]
+            subgraph = g.subgraph(nodes=dfs_nodes)
+            tree = nx.minimum_spanning_tree(subgraph)
+            if tree.size(weight='weight') < best_tree_cost:
+                best_tree = tree
+                best_tree_cost = tree.size(weight='weight')
+
+        print(f'Weight of the tree: {best_tree.size(weight="weight")}')
+        assert nx.is_tree(best_tree), 'Found something that is not a tree'
+        assert best_tree.number_of_nodes() == self.k, 'Found a tree with the wrong number of nodes'
+        assert best_tree.number_of_edges() == self.k - 1, 'Found a tree with the wrong number of edges'
+
+        return best_tree
 
 
 OPTIMAL_SOLUTIONS = {

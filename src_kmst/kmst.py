@@ -182,12 +182,12 @@ class KMST:
         Args:
             instance: Instance object with the problem instance.
         """
-        self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E) == instance.k - 1)
-        self.solver.addConstr(gp.quicksum(self.z[i] for i in instance.V) == instance.k)
+        self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E) == instance.k - 1, name='total_edges')
+        self.solver.addConstr(gp.quicksum(self.z[i] for i in instance.V) == instance.k, name='total_nodes')
 
         for i in instance.V:
-            self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i) <= (instance.k - 1) * self.z[i])
-            self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i))
+            self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i) <= (instance.k - 1) * self.z[i], name=f'node_1_{i}')
+            self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.E if e[0] == i or e[1] == i), name=f'node_2_{i}')
 
     def define_constraints_dcc(self, instance: Instance):
         """
@@ -196,19 +196,19 @@ class KMST:
         Args:
             instance: Instance object with the problem instance.
         """
-        self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.A) == instance.k - 1)
-        self.solver.addConstr(gp.quicksum(self.z[i] for i in instance.V) == instance.k)
-        self.solver.addConstr(gp.quicksum(self.x[(0, i)] for i in instance.V) == 1)
+        self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.A) == instance.k - 1, name='total_edges')
+        self.solver.addConstr(gp.quicksum(self.z[i] for i in instance.V) == instance.k, name='total_nodes')
+        self.solver.addConstr(gp.quicksum(self.x[(0, i)] for i in instance.V) == 1, name='root_out')
 
         for i in instance.V:
-            self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.A if i in e) <= (instance.k - 1) * self.z[i])
+            self.solver.addConstr(gp.quicksum(self.x[e] for e in instance.A if i in e) <= (instance.k - 1) * self.z[i], name=f'node_1_{i}')
             self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.A if e[1] == i) +
-                                  gp.quicksum(self.x[e] for e in instance.A if e[0] == i))
-            self.solver.addConstr(self.x[(i, 0)] == 0)
+                                  gp.quicksum(self.x[e] for e in instance.A if e[0] == i), name=f'node_2_{i}')
+            self.solver.addConstr(self.x[(i, 0)] == 0, name=f'root_in_{i}')
         for e in instance.Eext:
             if e[0] > e[1]:
                 continue
-            self.solver.addConstr(self.x[e] + self.x[e[1], e[0]] <= 1)
+            self.solver.addConstr(self.x[e] + self.x[e[1], e[0]] <= 1, name=f'edge_{e}')
 
     def define_variables_mtz(self, instance: Instance):
         """
@@ -500,7 +500,7 @@ class KMST:
             'theoretical_optimal': OPTIMAL_SOLUTIONS[instance.name],
             'opt_gap': opt_gap,
             'tighten': self.tighten,
-            'cuts_fractional': self.cuts,
+            'cuts': self.cuts,
             'solve_time': solve_time
         }
         if not len(self.results):
@@ -515,7 +515,26 @@ class KMST:
         Args:
             instance: Instance object with the problem instance.
         """
-        raise NotImplementedError('Hints are not implemented yet')
+        if self.formulation not in self.exp_form:
+            raise Warning('Hints are only implemented for Gurobi -> no hints will be defined')
+
+        # Find a tree of size k
+        tree = instance.find_tree()
+
+        if self.formulation == 'CEC':
+            for e in instance.E:
+                self.x[e].Start = 1 if e in tree.edges() else 0
+            for i in instance.V:
+                self.z[i].Start = 1 if i in tree.nodes() else 0
+
+        else: # self.formulation == 'DCC'
+            tree.add_edge(0, list(tree.nodes())[0])        # Add edge from root to some node in the tree
+            # Traverse the tree from node zero and define Start values for the variables
+            tree_edges = set(nx.dfs_edges(tree, source=0))
+            for e in instance.Aext:
+                self.x[e].Start = 1 if e in tree_edges else 0
+            for i in instance.V:
+                self.z[i].Start = 1 if i in tree.nodes() else 0
 
     def run(self):
         """
