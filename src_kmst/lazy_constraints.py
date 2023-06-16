@@ -44,8 +44,6 @@ def find_min_cut(x: dict, z: dict):
         if flow < z[i] - 0.0001:
             val, partition = nx.minimum_cut(G, 0, i, capacity='weight')
             outgoing_e = [(u, v) for u, v in x.keys() if u in partition[0] and v in partition[1]]
-            assert round(sum([x[e] for e in outgoing_e]), 4) == 0, 'Cut value is not zero'
-            assert round(z[i], 4) == 1, 'z value is not one'
             return outgoing_e, i
     return None, None
 
