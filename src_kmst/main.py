@@ -33,11 +33,16 @@ def multiple_exec(basic_dict: dict):
     results = pd.concat(results)
     results.to_csv(f'{config.output_path}/{timestamp}.csv', index=False)
 
-    # Open results.csv and update with new results
-    # aux = pd.read_csv(f'{config.output_path}/results.csv')
-    # results = pd.concat([aux, results])
-    # results.drop_duplicates(['instance', 'solver', 'tighten', 'formulation'], inplace=True, keep='last')
-    # results.to_csv(f'{config.output_path}/results.csv', index=False)
+    # Open results_2.csv and update with new results
+    aux = pd.read_csv(f'{config.output_path}/results_2.csv')
+    if aux.empty:
+        results.to_csv(f'{config.output_path}/results_2.csv', index=False)
+        return
+    results = pd.concat([aux, results])
+    results.sort_values(by='solve_time', inplace=True)
+    results.drop_duplicates(['instance', 'solver', 'tighten', 'formulation', 'define_hints', 'cuts'],
+                            inplace=True, keep='first')
+    results.to_csv(f'{config.output_path}/results_2.csv', index=False)
 
 
 if __name__ == '__main__':
