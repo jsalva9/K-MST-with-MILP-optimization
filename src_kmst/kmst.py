@@ -205,10 +205,12 @@ class KMST:
             self.solver.addConstr(self.z[i] <= gp.quicksum(self.x[e] for e in instance.A if e[1] == i) +
                                   gp.quicksum(self.x[e] for e in instance.A if e[0] == i), name=f'node_2_{i}')
             self.solver.addConstr(self.x[(i, 0)] == 0, name=f'root_in_{i}')
-        for e in instance.Eext:
-            if e[0] > e[1]:
-                continue
-            self.solver.addConstr(self.x[e] + self.x[e[1], e[0]] <= 1, name=f'edge_{e}')
+            for j in instance.V:
+                if (i, j) in instance.Aext and i < j:
+                    self.solver.addConstr(self.x[i, j] + self.x[j, i] <= self.z[i], name=f'edge_{i}_{j}')
+        for (i, j) in instance.Eext:
+            if i < j:
+                self.solver.addConstr(self.x[i, j] + self.x[j, i] <= 1, name=f'edge_{i}_{j}')
 
     def define_variables_mtz(self, instance: Instance):
         """
@@ -437,7 +439,7 @@ class KMST:
         elif self.formulation in ['DCC']:
             x_vals = self.solver.getAttr('X', self.x)
             for e in instance.A:
-                if x_vals[e] == 1:
+                if x_vals[e] > .5:
                     G.add_edge(*e)
 
         # Check if the solution is a tree
@@ -553,6 +555,7 @@ class KMST:
             self.define_constraints(instance)
             self.define_objective(instance)
             print(f' - building model took {time.time() - self.start_time} seconds')
+            print(f' - looking for theoretical optimal: {OPTIMAL_SOLUTIONS[instance.name]}')
             if self.hint_solution:
                 self.define_hints(instance)
             feasible, solve_time, status, objective = self.solve()

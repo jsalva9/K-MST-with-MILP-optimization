@@ -27,6 +27,7 @@ def multiple_exec(basic_dict: dict):
                         kmst = KMST(config_dict)
                         kmst.run()
                         results.append(kmst.results)
+                        pd.concat(results).to_csv(f'{config.output_path}/temp.csv', index=False)
 
     # Print results with timestamp
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -42,6 +43,7 @@ def multiple_exec(basic_dict: dict):
     results.sort_values(by='solve_time', inplace=True)
     results.drop_duplicates(['instance', 'solver', 'tighten', 'formulation', 'define_hints', 'cuts'],
                             inplace=True, keep='first')
+    results.sort_values(by=['solver', 'tighten', 'formulation', 'define_hints', 'cuts', 'instance'], inplace=True)
     results.to_csv(f'{config.output_path}/results_2.csv', index=False)
 
 
