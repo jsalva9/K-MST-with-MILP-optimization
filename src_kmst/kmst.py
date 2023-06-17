@@ -479,8 +479,7 @@ class KMST:
             objective: Objective value obtained by the solver.
 
         """
-        if (self.formulation in self.exp_form and status != GRB.OPTIMAL) or \
-                (self.formulation not in self.exp_form and status == pywraplp.Solver.NOT_SOLVED):
+        if self.formulation not in self.exp_form and status == pywraplp.Solver.NOT_SOLVED:
             opt_gap = float('nan')
         else:
             opt_gap = round((objective - OPTIMAL_SOLUTIONS[instance.name]) / OPTIMAL_SOLUTIONS[instance.name], 4)
@@ -546,8 +545,10 @@ class KMST:
 
         self.load_instances()
         for instance_name, instance in self.instances.items():
+            if instance_name[-1:] == '0':
+                continue
             print(f'\nRunning instance {instance_name} with {self.formulation}. Solver: {self.solver_name}, tighten: {self.tighten}')
-            if self.formulation == 'CEC':
+            if self.formulation in self.exp_form:
                 print(f'Cutting planes: {self.cuts}. Hint solution: {self.hint_solution}')
 
             self.define_model()
