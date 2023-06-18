@@ -103,3 +103,27 @@ def compute_results_statistics():
                                                              df_wide['ortools']['MTZ'][True]
 
     df_wide.to_csv(f'../kmst_output/results_agg.csv', index=True)
+
+
+def compute_results_statistics_2():
+    """Compute statistics for results2.csv"""
+    df = pd.read_csv('../kmst_output/results_2.csv')
+    df.loc[(df.solve_time >= 3599) | df.opt_gap.isna(), 'solve_time'] = float('nan')
+    df_wide = pd.pivot(df, index=['instance', 'formulation', 'cuts'], values=['nodes', 'solve_time'], columns=['define_hints'])
+    df_wide = df_wide[(df_wide.nodes[True] > 1) & (df_wide.nodes[False] > 1)]
+    print(f'-> Examining effect of MIP start')
+    df_wide['relative_difference_nodes'] = (df_wide['nodes'][True] - df_wide['nodes'][False]) / df_wide['nodes'][False]
+    print(f'Relative difference nodes: {df_wide.relative_difference_nodes.mean()}')
+    df_wide['relative_difference_solve_time'] = (df_wide['solve_time'][True] - df_wide['solve_time'][False]) / df_wide['solve_time'][False]
+    print(f'Relative difference solve time: {df_wide.relative_difference_solve_time.mean()}')
+    df = df[(~df.define_hints) &
+            (df.formulation == 'DCC') &
+            (df.cuts != 'fractional')]
+    df_wide = pd.pivot(df, index=['instance', 'formulation'], values=['nodes', 'solve_time'], columns=['cuts'])
+    df_wide['relative_difference_solve_time'] = (df_wide['solve_time']['both'] - df_wide['solve_time']['integral']) / df_wide['solve_time']['integral']
+    df_wide['relative_difference_nodes'] = (df_wide['nodes']['both'] - df_wide['nodes']['integral']) / df_wide['nodes']['integral']
+
+
+    print(f'-> Examining effect of cuts')
+    print(f'Relative difference nodes: {df_wide.relative_difference_nodes.mean()}')
+    print(f'Relative difference solve time: {df_wide.relative_difference_solve_time.mean()}')
