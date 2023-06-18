@@ -55,6 +55,7 @@ class KMST:
             self.solver = gp.Model('KMST')
             self.solver.setParam('TimeLimit', self.time_limit)
             self.solver.Params.LazyConstraints = 1
+            self.solver._num_lazy_constraints = 0
         else:
             self.solver = pywraplp.Solver.CreateSolver(solvers_map[self.solver_name])
             self.solver.set_time_limit(self.time_limit * 1000)
@@ -502,6 +503,7 @@ class KMST:
             'opt_gap': opt_gap,
             'tighten': self.tighten,
             'cuts': self.cuts,
+            'number_of_cuts': None if self.formulation not in self.exp_form else int(self.solver._num_lazy_constraints),
             'solve_time': solve_time
         }
         if not len(self.results):
@@ -545,7 +547,7 @@ class KMST:
 
         self.load_instances()
         for instance_name, instance in self.instances.items():
-            if instance_name[-1:] == '0':
+            if instance_name[-1:] == '1':
                 continue
             print(f'\nRunning instance {instance_name} with {self.formulation}. Solver: {self.solver_name}, tighten: {self.tighten}')
             if self.formulation in self.exp_form:

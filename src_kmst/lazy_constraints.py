@@ -102,6 +102,7 @@ def add_cec(model: gp.Model, x):
     # Find the shortest cycle in the selected edges
     cycle = find_cycle(x)
     if cycle is not None:
+        model._num_lazy_constraints += 1
         # Add lazy constraint to the model
         model.cbLazy(gp.quicksum(model._x[e] for e in cycle) <= len(cycle) - 1)
 
@@ -163,5 +164,6 @@ def add_cutset(model: gp.Model, x: dict, z: dict):
     """
     outgoing_e, i = find_min_cut(x, z)
     if i is not None:
+        model._num_lazy_constraints += 1
         # Add lazy constraint to the model
         model.cbLazy(gp.quicksum(model._x[e] for e in outgoing_e) >= model._z[i])

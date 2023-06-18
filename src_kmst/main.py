@@ -40,7 +40,7 @@ def multiple_exec(basic_dict: dict):
         results.to_csv(f'{config.output_path}/results_2.csv', index=False)
         return
     results = pd.concat([aux, results])
-    results.sort_values(by='solve_time', inplace=True)
+    results.sort_values(by=['number_of_cuts', 'solve_time'], inplace=True, na_position='last')
     results.drop_duplicates(['instance', 'solver', 'tighten', 'formulation', 'define_hints', 'cuts'],
                             inplace=True, keep='first')
     results.sort_values(by=['solver', 'tighten', 'formulation', 'define_hints', 'cuts', 'instance'], inplace=True)
@@ -63,3 +63,6 @@ if __name__ == '__main__':
 
     # from src_kmst.utils import compute_results_statistics
     # compute_results_statistics()
+
+    # from src_kmst.utils import compute_results_statistics_2
+    # compute_results_statistics_2()
