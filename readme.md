@@ -92,5 +92,5 @@ The results are stored in a csv file named %Y%m%d-%H%M%S.csv. The columns are th
 - `opt_gap`: optimality gap
 - `tighten`: True if the formulation is tightened, False otherwise
 - `solve_time`: time spent in the solve method
-- `number_of_cuts`: Number of added violated inequalities (for CEC and DCC). It is not the actual number
+- `number_of_cuts`: number of added violated inequalities (for CEC and DCC). It is not the actual number
   of Lazy constraints but the number of times that a Lazy constraint has been added
