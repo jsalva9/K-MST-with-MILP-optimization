@@ -3,13 +3,15 @@ from ortools.linear_solver import pywraplp
 
 
 def f(u):
-    solver = pywraplp.Solver.CreateSolver('GUROBI')
-    y_1 = solver.IntVar(0, 1, 'y_1')
-    y_2 = solver.IntVar(0, 1, 'y_2')
-    y_3 = solver.IntVar(0, 1, 'y_3')
+    solver = pywraplp.Solver.CreateSolver('SCIP')
+    y_1 = solver.NumVar(0, 1, 'y_1')
+    y_2 = solver.NumVar(0, 1, 'y_2')
+    y_3 = solver.NumVar(0, 1, 'y_3')
     # u = solver.NumVar(-solver.infinity(), solver.infinity(), 'u')
-    # solver.Add(3 * y_1 + y_2 + 4 * y_3 <= 4)
-    solver.Maximize(10 * y_1 + 4 * y_2 + 14 * y_3 + u * (4 - 3 * y_1 - y_2 - 4 * y_3))
+    # solver.Add(2 * y_1 + 3 * y_2 + y_3 == 4)
+    solver.Add(4 * y_1 + 2 * y_2 + 3 * y_3 <= 5)
+    u[1] = 0
+    solver.Maximize(3 * y_1 + 1 * y_2 + 1 * y_3 + u[0] * (4 - 2 * y_1 - 3 * y_2 - 1 * y_3) + u[1] * (5 - 3 * y_1 - 1 * y_2 - 2 * y_3))
 
     solver.Solve()
     print('Objective value =', solver.Objective().Value())
@@ -35,25 +37,34 @@ def g():
 
 
 def subgradient():
-    u = 1
+    u = np.array([3, 1])
     k = 0
     mu0 = 1
-    rho = 0.9
+    rho = 1/2
     # Write results to a file
     with open('results.txt', 'w') as file:
         while k <= 200:
             mu = mu0 * rho ** k
-            file.write(f'{k} & {round(u, 5)} & {mu:.2e} ')
+            file.write(f'{k} & {(u)} & {mu:.2e} ')
             y1, y2, y3, opt = f(u)
-            file.write(f'& {y1} & {y2} & {y3} & {round(opt, 5)} \\\\ \n')
-            u = max(0, u - mu * (4 - 3 * y1 - y2 - 4 * y3))
+            file.write(f'& {y1} & {y2} & {y3} & {opt} \\\\ \n')
+
+            u[0] = max(0, u[0] - mu * (4 - 2 * y1 - 3 * y2 - 1 * y3))
+            u[1] = max(0, u[1] - mu * (5 - 3 * y1 - 1 * y2 - 2 * y3))
             k += 1
 
 
 if __name__ == '__main__':
-    # f(3.5)
+    f([0, 0])
+    wld = 100
+    for i in np.linspace(0, 5, 101):
+        for j in np.linspace(0, 5, 101):
+            y1, y2, y3, opt = f([i, j])
+            wld = min(opt, wld)
+    #
+    # print(wld)
     # subgradient()
-    g()
+    # g()
 
 
 
