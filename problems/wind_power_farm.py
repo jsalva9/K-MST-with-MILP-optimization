@@ -33,5 +33,57 @@ def f():
     print('Vars z =', [z[i].solution_value() for i in L])
 
 
+def g():
+    solver = pywraplp.Solver.CreateSolver('SCIP')
+
+    D = {1, 2, 3, 4, 5}
+    L = {'a', 'b', 'c', 'd', 'e'}
+    x, y = {}, {}
+    for i in L:
+        x[i] = solver.BoolVar(f'x_{i}')
+    for i in D:
+        y[i] = solver.BoolVar(f'y_{i}')
+
+    costs = {
+        'a': 20,
+        'b': 40,
+        'c': 30,
+        'd': 10,
+        'e': 50
+    }
+    near = {
+        'a': [1, 5],
+        'b': [1, 3, 4],
+        'c': [2, 3],
+        'd': [5],
+        'e': [3, 4]
+    }
+    inverse_near = {
+        1: ['a', 'b'],
+        2: ['c'],
+        3: ['b', 'c', 'e'],
+        4: ['b', 'e'],
+        5: ['a', 'd']
+    }
+
+    solver.Add(sum(y[j] for j in D) >= 4)
+
+    for i in L:
+        for j in near[i]:
+            solver.Add(x[i] <= y[j])
+
+    for j in D:
+        solver.Add(y[j] <= sum(x[i] for i in L if i in inverse_near[j]))
+
+    solver.Minimize(sum(costs[i] * x[i] for i in L))
+
+    # Print solution
+    solver.Solve()
+    print('Objective value =', solver.Objective().Value())
+    print('Vars x =', [x[i].solution_value() for i in L])
+    print('Vars y =', [y[i].solution_value() for i in D])
+
+
 if __name__ == "__main__":
-    f()
+    # f()
+    g()
